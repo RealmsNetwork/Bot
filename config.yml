@@ -1,0 +1,53 @@
+# RealmsNetwork Bot Configuration
+# Edit these values before starting the bot.
+
+# The ID of your server (guild). Right-click the server icon and copy ID.
+guildId: "YOUR_GUILD_ID_HERE"
+
+# Custom branding used in all embeds and messages.
+branding:
+  serverName: "RealmsNetwork"
+  supportUrl: "https://dsc.gg/realmsnetworksupport"
+  embedColor: "#FF0000"
+  logColor: "#2B2D31"
+
+# Global staff role - shared across all modules.
+staff:
+  roleId: "YOUR_STAFF_ROLE_ID_HERE"
+
+# Honeypot module settings.
+honeypot:
+  channelId: "YOUR_HONEYPOT_CHANNEL_ID_HERE"
+  logChannelId: "YOUR_LOG_CHANNEL_ID_HERE"
+  punishment: "ban"
+  ignoreBots: true
+  ignoreWebhooks: true
+  ignoreStaff: true
+  dmBeforePunishment: true
+  recreateWarning: true
+  purgeOnStartup: true
+  deleteTriggerMessage: true
+  timeoutDuration: 86400000
+
+  warningEmbed:
+    title: "<a:exclamation:1426253027693559991> WARNING <a:exclamation:1426253027693559991>"
+    color: null
+    author:
+      name: null
+    description: |
+      # Honeypot Security Channel
+
+      This channel is continuously monitored by {serverName}'s automated security system.
+
+      Any attempt to send messages, commands, images, stickers, GIFs, emojis, files, embeds, polls, or any other content will immediately trigger the honeypot.
+
+      Consequences:
+      - Permanent ban.
+      - Incident logged for staff review.
+      - No exceptions.
+
+      Do not interact with this channel for any reason.
+
+      Appeal: {supportUrl}
+    footer:
+      text: null
