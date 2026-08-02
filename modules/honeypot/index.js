@@ -2086,7 +2086,7 @@ function registerEvents() {
 
 
 
-function initializeHoneypot(client, config) {
+function initialize(client, config) {
 
   clientRef = client;
 
@@ -2106,6 +2106,6 @@ function initializeHoneypot(client, config) {
 
 module.exports = {
 
-  initializeHoneypot
+  initialize
 
 };
