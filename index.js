@@ -66,7 +66,6 @@ function loadModules() {
     try {
       const moduleExports = require(modulePath);
       if (typeof moduleExports.initialize === 'function') {
-        // Pass the entire config – the module will read its own section.
         moduleExports.initialize(client, CONFIG);
         console.log(`[Modules] Loaded "${moduleName}"`);
       } else {
