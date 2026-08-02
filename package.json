@@ -1,0 +1,36 @@
+{
+  "name": "realms-bot",
+  "version": "1.0.0",
+  "description": "A multi-module Discord bot for RealmsNetwork, featuring a honeypot security module and more.",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "nodemon index.js"
+  },
+  "keywords": [
+    "discord",
+    "bot",
+    "security",
+    "honeypot",
+    "moderation",
+    "multi-module",
+    "all-in-one"
+  ],
+  "author": "THEMPGUY",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/RealmsNetwork/Bot"
+  },
+  "engines": {
+    "node": ">=16.9.0"
+  },
+  "dependencies": {
+    "discord.js": "^14.14.1",
+    "dotenv": "^16.3.1",
+    "js-yaml": "^4.1.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.3"
+  }
+}
