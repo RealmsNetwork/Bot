@@ -64,4 +64,4 @@ aichat:
   maxInputLength: 2000
   fallbackMessage: "I couldn't generate a response. Please try again."
 # Do not change or you will break the config.
-version: 1.5
+version: 1.6
