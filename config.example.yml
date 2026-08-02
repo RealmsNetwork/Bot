@@ -56,7 +56,7 @@ honeypot:
 # ------------------------------------------------------------------
 # Gemini AI Chat module
 # ------------------------------------------------------------------
-chat:
+aichat:
   # Enable/disable this module completely.
   enabled: true
   channelId: "YOUR_CHAT_CHANNEL_ID_HERE"
