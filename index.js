@@ -38,7 +38,7 @@ const client = new Client({
   partials: [Partials.Channel, Partials.Message, Partials.GuildMember, Partials.User],
 });
 
-const { initializeHoneypot } = require('./honeypot');
+const { initializeHoneypot } = require('./modules/honeypot/index');
 initializeHoneypot(client, CONFIG);
 
 module.exports = { CONFIG, client };
