@@ -6,106 +6,89 @@ const path = require('path');
 const yaml = require('js-yaml');
 
 const CONFIG_PATH = path.join(__dirname, 'config.yml');
-const EXAMPLE_PATH = path.join(__dirname, 'config.example.yml');
-
-function mergeDefaults(defaults, current) {
-    if (Array.isArray(defaults)) return current ?? defaults;
-    if (typeof defaults !== 'object' || defaults === null) {
-        return current !== undefined ? current : defaults;
-    }
-
-    const result = {};
-
-    for (const key of Object.keys(defaults)) {
-        result[key] = mergeDefaults(defaults[key], current?.[key]);
-    }
-
-    if (current && typeof current === 'object') {
-        for (const key of Object.keys(current)) {
-            if (!(key in result)) result[key] = current[key];
-        }
-    }
-
-    return result;
-}
-
-function loadConfig() {
-    if (!fs.existsSync(EXAMPLE_PATH)) {
-        console.error('[Config] Missing config.example.yml');
-        process.exit(1);
-    }
-
-    const example = yaml.load(fs.readFileSync(EXAMPLE_PATH, 'utf8'));
-    let config = {};
-
-    if (fs.existsSync(CONFIG_PATH)) {
-        config = yaml.load(fs.readFileSync(CONFIG_PATH, 'utf8')) || {};
-    }
-
-    const oldVersion = config.version || 1;
-    const newVersion = example.version || 1;
-
-    const updated = mergeDefaults(example, config);
-
-    if (oldVersion < newVersion) {
-        updated.version = newVersion;
-
-        fs.writeFileSync(
-            CONFIG_PATH,
-            yaml.dump(updated, { noRefs: true, lineWidth: -1 }),
-            'utf8'
-        );
-
-        console.log(`[Config] Updated config.yml ${oldVersion} -> ${newVersion}`);
-    }
-
-    return updated;
-}
-
 let CONFIG;
-
 try {
-    CONFIG = loadConfig();
-    console.log('[Config] Loaded successfully');
-} catch (err) {
-    console.error('[Config] Failed:', err.message);
-    process.exit(1);
+  const file = fs.readFileSync(CONFIG_PATH, 'utf8');
+  CONFIG = yaml.load(file);
+  console.log('[Config] Loaded successfully');
+} catch (e) {
+  console.error('[Config] Failed to load config.yml:', e.message);
+  process.exit(1);
 }
 
 CONFIG.token = process.env.DISCORD_TOKEN;
-
 if (!CONFIG.token) {
-    console.error('[Config] DISCORD_TOKEN missing from environment');
-    process.exit(1);
+  console.error('[Config] DISCORD_TOKEN not set in .env or environment variables');
+  process.exit(1);
 }
 
 const client = new Client({
-    intents: [
-        GatewayIntentBits.Guilds,
-        GatewayIntentBits.GuildMessages,
-        GatewayIntentBits.MessageContent,
-        GatewayIntentBits.GuildMembers,
-        GatewayIntentBits.GuildModeration,
-        GatewayIntentBits.GuildMessageReactions,
-        GatewayIntentBits.DirectMessages
-    ],
-    partials: [
-        Partials.Channel,
-        Partials.Message,
-        Partials.GuildMember,
-        Partials.User
-    ]
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.MessageContent,
+    GatewayIntentBits.GuildMembers,
+    GatewayIntentBits.GuildModeration,
+    GatewayIntentBits.GuildMessageReactions,
+    GatewayIntentBits.DirectMessages,
+  ],
+  partials: [Partials.Channel, Partials.Message, Partials.GuildMember, Partials.User],
 });
 
-const { initializeHoneypot } = require('./modules/honeypot/index');
-initializeHoneypot(client, CONFIG);
+// ------------------------------------------------------------------
+// DYNAMIC MODULE LOADER
+// ------------------------------------------------------------------
+function loadModules() {
+  const modulesPath = path.join(__dirname, 'modules');
+  if (!fs.existsSync(modulesPath)) {
+    console.log('[Modules] No modules folder found.');
+    return;
+  }
+
+  const moduleFolders = fs.readdirSync(modulesPath, { withFileTypes: true })
+    .filter(dirent => dirent.isDirectory())
+    .map(dirent => dirent.name);
+
+  for (const moduleName of moduleFolders) {
+    const moduleConfig = CONFIG[moduleName];
+    // If module has no config or is explicitly disabled, skip it.
+    if (!moduleConfig || moduleConfig.enabled === false) {
+      console.log(`[Modules] Skipping "${moduleName}" (disabled or no config)`);
+      continue;
+    }
+
+    const modulePath = path.join(modulesPath, moduleName, 'index.js');
+    if (!fs.existsSync(modulePath)) {
+      console.warn(`[Modules] Module "${moduleName}" has no index.js, skipping.`);
+      continue;
+    }
+
+    try {
+      const moduleExports = require(modulePath);
+      if (typeof moduleExports.initialize === 'function') {
+        // Pass the entire config – the module will read its own section.
+        moduleExports.initialize(client, CONFIG);
+        console.log(`[Modules] Loaded "${moduleName}"`);
+      } else {
+        console.warn(`[Modules] Module "${moduleName}" does not export an initialize function.`);
+      }
+    } catch (err) {
+      console.error(`[Modules] Error loading "${moduleName}":`, err);
+    }
+  }
+}
+
+// ------------------------------------------------------------------
+// Load all modules
+// ------------------------------------------------------------------
+loadModules();
 
 module.exports = { CONFIG, client };
 
 if (require.main === module) {
-    client.login(CONFIG.token)
-        .then(() => console.log('[Bot] Online'))
-        .catch(err => console.error('[Bot] Login failed:', err));
+  client.login(CONFIG.token)
+    .then(() => console.log('[Bot] Online'))
+    .catch(err => console.error('[Bot] Login failed:', err));
 }
 
 process.on('unhandledRejection', console.error);
