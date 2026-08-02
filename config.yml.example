@@ -51,3 +51,6 @@ honeypot:
       Appeal: {supportUrl}
     footer:
       text: null
+
+# Do not change or you will break the config.
+version: 1
