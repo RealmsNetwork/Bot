@@ -181,7 +181,7 @@ try{
 let genAI=new GoogleGenerativeAI(key);
 
 model=genAI.getGenerativeModel({
-model:config.aichat.model||"gemini-1.5-flash"
+model:config.aichat.model||"gemini-2.5-flash"
 });
 
 }catch(e){
