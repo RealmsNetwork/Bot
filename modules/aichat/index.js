@@ -108,7 +108,7 @@ function registerEvents() {
 // ------------------------------------------------------------------
 // Initialisation
 // ------------------------------------------------------------------
-function initializeChat(client, config) {
+function initialize(client, config) {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
     console.warn('[Chat] GEMINI_API_KEY not set – chat module disabled');
@@ -126,4 +126,4 @@ function initializeChat(client, config) {
   console.log('[Chat] Module initialised, listening to channel ' + config.chat?.channelId);
 }
 
-module.exports = { initializeChat };
+module.exports = { initialize };
