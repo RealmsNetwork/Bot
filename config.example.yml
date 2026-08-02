@@ -60,8 +60,8 @@ aichat:
   # Enable/disable this module completely.
   enabled: true
   channelId: "YOUR_CHAT_CHANNEL_ID_HERE"
-  cooldownSeconds: 5
   maxInputLength: 2000
   fallbackMessage: "I couldn't generate a response. Please try again."
+  model: "gemini-2.5-flash"
 # Do not change or you will break the config.
-version: 1.6
+version: 1.7
