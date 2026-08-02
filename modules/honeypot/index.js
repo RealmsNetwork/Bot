@@ -2087,17 +2087,11 @@ function registerEvents() {
 
 
 function initialize(client, config) {
-
   clientRef = client;
-
   configRef = config;
 
-
-
   loadData();
-
   registerEvents();
-
 }
 
 
@@ -2105,7 +2099,5 @@ function initialize(client, config) {
 
 
 module.exports = {
-
   initialize
-
 };
