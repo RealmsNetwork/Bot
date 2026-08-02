@@ -17,6 +17,7 @@ staff:
 
 # Honeypot module settings.
 honeypot:
+  enabled: true
   channelId: "YOUR_HONEYPOT_CHANNEL_ID_HERE"
   logChannelId: "YOUR_LOG_CHANNEL_ID_HERE"
   punishment: "ban"
@@ -52,5 +53,15 @@ honeypot:
     footer:
       text: null
 
+# ------------------------------------------------------------------
+# Gemini AI Chat module
+# ------------------------------------------------------------------
+chat:
+  # Enable/disable this module completely.
+  enabled: true
+  channelId: "YOUR_CHAT_CHANNEL_ID_HERE"
+  cooldownSeconds: 5
+  maxInputLength: 2000
+  fallbackMessage: "I couldn't generate a response. Please try again."
 # Do not change or you will break the config.
 version: 1
