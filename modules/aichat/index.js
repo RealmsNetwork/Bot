@@ -1,129 +1,117 @@
-const { GoogleGenerativeAI } = require('@google/generative-ai');
+// aichat.js
+const {GoogleGenerativeAI}=require("@google/generative-ai");
 
-let clientRef = null;
-let configRef = null;
-let model = null;
+let clientRef=null;
+let configRef=null;
+let model=null;
+const cooldowns=new Map();
 
-// ------------------------------------------------------------------
-// Cooldown tracker
-// ------------------------------------------------------------------
-const cooldowns = new Map();
-
-function isOnCooldown(userId, cooldownSeconds) {
-  const now = Date.now();
-  const last = cooldowns.get(userId);
-  if (last && (now - last) < cooldownSeconds * 1000) return true;
-  cooldowns.set(userId, now);
-  return false;
+function cooldown(id,time){
+let now=Date.now();
+let last=cooldowns.get(id);
+if(last&&(now-last)<time*1000)return true;
+cooldowns.set(id,now);
+return false;
 }
 
-// ------------------------------------------------------------------
-// Utilities
-// ------------------------------------------------------------------
-function truncateText(text, maxLen) {
-  if (!text) return '';
-  return text.length <= maxLen ? text : text.slice(0, maxLen) + '…';
+function truncate(text,max){
+if(!text)return "";
+return text.length<=max?text:text.slice(0,max)+"…";
 }
 
-async function safeReply(message, content) {
-  try {
-    await message.reply(content);
-  } catch (err) {
-    console.error('[Chat] Failed to send reply:', err);
-  }
+async function safeReply(message,text){
+try{await message.reply(text)}catch(e){console.error("[AI Reply]",e.message)}
 }
 
-function startTyping(channel) {
-  let stopped = false;
-  let interval = null;
-
-  const sendTyping = async () => {
-    if (stopped) return;
-    try {
-      await channel.sendTyping();
-    } catch (_) {}
-  };
-
-  sendTyping();
-  interval = setInterval(sendTyping, 5000);
-
-  return () => {
-    stopped = true;
-    if (interval) clearInterval(interval);
-  };
+function startTyping(channel){
+let stopped=false;
+let timer=null;
+async function send(){
+if(stopped)return;
+try{await channel.sendTyping()}catch(e){}
+}
+send();
+timer=setInterval(send,5000);
+return()=>{stopped=true;if(timer)clearInterval(timer)};
 }
 
-// ------------------------------------------------------------------
-// Main message handler
-// ------------------------------------------------------------------
-async function handleMessage(message) {
-  // Safety checks
-  if (message.author.bot) return;
-  if (message.partial) await message.fetch().catch(() => {});
-  if (message.channelId !== configRef.chat.channelId) return;
+async function handleMessage(message){
+try{
+if(!configRef?.aichat)return;
+if(message.author.bot)return;
+if(message.partial)await message.fetch().catch(()=>{});
+if(!message.guild)return;
+if(configRef.guildId&&message.guild.id!==configRef.guildId)return;
+if(message.channelId!==configRef.aichat.channelId)return;
 
-  const content = message.content?.trim();
-  if (!content) return;
+let content=message.content?.trim();
+if(!content)return;
 
-  const cooldownSec = configRef.chat.cooldownSeconds || 5;
-  if (isOnCooldown(message.author.id, cooldownSec)) {
-    await safeReply(message, `⏳ Please wait ${cooldownSec}s before sending another message.`);
-    return;
-  }
+let cd=configRef.aichat.cooldownSeconds||5;
 
-  const maxLen = configRef.chat.maxInputLength || 2000;
-  const safeContent = truncateText(content, maxLen);
-
-  const stopTyping = startTyping(message.channel);
-
-  try {
-    const result = await model.generateContent(safeContent);
-    const response = await result.response;
-    let replyText = response.text();
-
-    if (!replyText || replyText.length === 0) {
-      replyText = configRef.chat.fallbackMessage || 'I couldn’t generate a response. Please try again.';
-    }
-
-    replyText = truncateText(replyText, 2000);
-    await message.reply(replyText);
-  } catch (error) {
-    console.error('[Chat] Gemini API error:', error);
-    await safeReply(message, '⚠️ The AI service is temporarily unavailable. Please try later.');
-  } finally {
-    stopTyping();
-  }
+if(cooldown(message.author.id,cd)){
+await safeReply(message,`⏳ Please wait ${cd}s before sending another message.`);
+return;
 }
 
-// ------------------------------------------------------------------
-// Register events
-// ------------------------------------------------------------------
-function registerEvents() {
-  clientRef.on('messageCreate', async (message) => {
-    if (!message.guild || message.guild.id !== configRef.guildId) return;
-    await handleMessage(message);
-  });
+content=truncate(content,configRef.aichat.maxInputLength||2000);
+
+let stop=startTyping(message.channel);
+
+try{
+let result=await model.generateContent(content);
+let response=await result.response;
+let reply=response.text();
+
+if(!reply)reply=configRef.aichat.fallbackMessage||"⚠️ I couldn't generate a response.";
+
+await safeReply(message,truncate(reply,2000));
+}catch(e){
+console.error("[AI Gemini]",e);
+await safeReply(message,"⚠️ AI service is currently unavailable.");
+}finally{
+stop();
+}
+}catch(e){console.error("[AI Handler]",e)}
 }
 
-// ------------------------------------------------------------------
-// Initialisation
-// ------------------------------------------------------------------
-function initialize(client, config) {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) {
-    console.warn('[Chat] GEMINI_API_KEY not set – chat module disabled');
-    return;
-  }
-
-  clientRef = client;
-  configRef = config;
-
-  // Initialise Gemini
-  const genAI = new GoogleGenerativeAI(apiKey);
-  model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
-
-  registerEvents();
-  console.log('[Chat] Module initialised, listening to channel ' + config.chat?.channelId);
+function registerEvents(){
+try{
+clientRef.on("messageCreate",async message=>{
+await handleMessage(message);
+});
+}catch(e){console.error("[AI Events]",e)}
 }
 
-module.exports = { initialize };
+function initialize(client,config){
+try{
+let key=process.env.GEMINI_API_KEY;
+
+if(!key){
+console.warn("[AI] GEMINI_API_KEY missing, disabled");
+return;
+}
+
+if(!config.aichat?.channelId){
+console.warn("[AI] aichat.channelId missing, disabled");
+return;
+}
+
+clientRef=client;
+configRef=config;
+
+let genAI=new GoogleGenerativeAI(key);
+
+model=genAI.getGenerativeModel({
+model:"gemini-1.5-flash"
+});
+
+registerEvents();
+
+console.log("[AI] aichat module loaded");
+}catch(e){
+console.error("[AI Init]",e);
+}
+}
+
+module.exports={initialize};
