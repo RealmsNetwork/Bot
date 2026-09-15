@@ -1,0 +1,12 @@
+enabled: false
+afk:
+  enabled: true
+  clearOnMessage: true
+  mentionResponse: true
+tags:
+  enabled: true
+  managerRoles: []
+  maxLength: 4000
+highlights:
+  enabled: false
+  keywords: []
