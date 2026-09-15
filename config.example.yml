@@ -1,24 +1,35 @@
-# RealmsNetwork Bot V3 root configuration
-# Global runtime only. Module behavior belongs in modules/<name>/config.yml.
-# All feature modules are OFF by default except the tiny platform/help pack.
-version: 3
+# RealmsNetwork Bot production/development configuration
+# Secrets belong in .env. Module behavior belongs in modules/<name>/config.yml.
+version: 4
 
 guildId: "YOUR_GUILD_ID_HERE"
 
 branding:
   serverName: "RealmsNetwork"
+  botName: "RealmsNetwork Bot"
   embedColor: "#8b5cf6"
   logColor: "#2B2D31"
   footer: "RealmsNetwork"
-  supportUrl: "https://dsc.gg/realmsnetworksupport"
+  supportUrl: "https://dsc.gg/realmsnetwork"
   customBranding: true
+  permissionDenied: "You do not have permission to use this command."
+  errorMessage: "Something went wrong while running that command."
 
 runtime:
   environment: production
   gracefulShutdown: true
   crashProtection: true
-  maxListeners: 100
-  cacheSize: 1000
+  cacheSize: 2000
+  maxListeners: 200
+  healthChecks: true
+  diagnostics: true
+  logLevel: info
+
+prefix:
+  enabled: false
+  prefixes: ["!"]
+  mentionPrefix: true
+  errorMessage: "Command failed. Check the syntax and try again."
 
 commands:
   autoRefresh: true
@@ -41,15 +52,19 @@ permissions:
 
 sharding:
   enabled: false
+  autoDetect: false
   totalShards: auto
   shardList: auto
   respawn: true
   maxConcurrency: auto
 
 database:
-  enabled: false
-  primary: none
+  enabled: true
+  primary: sqlite
   fallbackToLocal: true
+  sqlite:
+    path: data/realmsbot.sqlite
+    journalMode: WAL
   mysql: { url: "", connectionLimit: 5 }
   postgres: { url: "", maxConnections: 5 }
   mongodb: { url: "", database: "realmsbot" }
@@ -72,6 +87,14 @@ customModules:
   maxLoopIterations: 100
   maxWaitMs: 30000
 
+adminPanel:
+  enabled: false
+  host: 127.0.0.1
+  port: 8787
+  tokenEnv: DASHBOARD_TOKEN
+  public: false
+  readOnly: true
+
 ai:
   enabled: false
   provider: ollama
@@ -84,24 +107,9 @@ ai:
   cooldownSeconds: 3
   retryDelayMs: 500
   fallbackProviders: [groq, openai_compatible]
-  providers:
-    ollama: { baseUrl: http://127.0.0.1:11434/v1, model: llama3.2 }
-    lmstudio: { baseUrl: http://127.0.0.1:1234/v1, model: local-model }
-    openai: { baseUrl: https://api.openai.com/v1, model: gpt-5 }
-    groq: { baseUrl: https://api.groq.com/openai/v1, model: openai/gpt-oss-120b }
-    mistral: { baseUrl: https://api.mistral.ai/v1, model: mistral-large-latest }
-    deepseek: { baseUrl: https://api.deepseek.com/v1, model: deepseek-chat }
-    xai: { baseUrl: https://api.x.ai/v1, model: grok-4 }
-    together: { baseUrl: https://api.together.xyz/v1, model: meta-llama/Llama-3.3-70B-Instruct-Turbo }
-    openrouter: { baseUrl: https://openrouter.ai/api/v1, model: openai/gpt-4o-mini }
-    perplexity: { baseUrl: https://api.perplexity.ai, model: sonar }
-    cohere: { baseUrl: https://api.cohere.com/compatibility/v1, model: command-a-03-2025 }
-    huggingface: { baseUrl: https://router.huggingface.co/v1, model: meta-llama/Llama-3.3-70B-Instruct }
-    anthropic: { baseUrl: https://api.anthropic.com, model: claude-sonnet-4-5 }
-    gemini: { model: gemini-2.5-flash }
-    openai_compatible: { baseUrl: http://127.0.0.1:1234/v1, model: local-model, apiKeyEnv: OPENAI_COMPATIBLE_API_KEY }
 
-platform: { enabled: true }
+# All feature modules are OFF until their own modules/<name>/config.yml enables them.
+platform: { enabled: false }
 aiLegacy: { enabled: false }
 security: { enabled: false }
 moderation: { enabled: false }
@@ -136,3 +144,4 @@ messageEmbedder: { enabled: false }
 highlights: { enabled: false }
 voiceLink: { enabled: false }
 music: { enabled: false }
+dashboard: { enabled: false }
