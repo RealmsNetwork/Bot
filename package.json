@@ -1,18 +1,19 @@
 {
   "name": "realms-bot",
-  "version": "2.0.0",
-  "description": "RealmsNetwork modular Discord bot",
+  "version": "3.0.0",
+  "description": "RealmsNetwork all-in-one modular Discord bot",
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
     "dev": "nodemon index.js",
-    "deploy": "node deploy-commands.js"
+    "deploy": "node deploy-commands.js",
+    "check": "node tools/qc.js"
   },
-  "keywords": ["discord", "bot", "realmsnetwork", "modular", "sharding"],
+  "keywords": ["discord", "bot", "realmsnetwork", "modular", "sharding", "automation", "moderation", "ai"],
   "author": "THEMPGUY",
   "license": "MIT",
   "repository": { "type": "git", "url": "https://github.com/RealmsNetwork/Bot" },
-  "engines": { "node": ">=18.18.0" },
+  "engines": { "node": ">=20.0.0" },
   "dependencies": {
     "discord.js": "14.27.0",
     "dotenv": "17.4.2",
