@@ -101,9 +101,7 @@ ai:
     gemini: { model: gemini-2.5-flash }
     openai_compatible: { baseUrl: http://127.0.0.1:1234/v1, model: local-model, apiKeyEnv: OPENAI_COMPATIBLE_API_KEY }
 
-# First-party module switches. Detailed settings live beside each module.
 platform: { enabled: true }
-ai: { enabled: false }
 aiLegacy: { enabled: false }
 security: { enabled: false }
 moderation: { enabled: false }
@@ -131,7 +129,7 @@ countryballs: { enabled: false }
 engagement: { enabled: false }
 feeds: { enabled: false }
 forms: { enabled: false }
-af k: { enabled: false }
+afk: { enabled: false }
 tags: { enabled: false }
 autoresponder: { enabled: false }
 messageEmbedder: { enabled: false }
