@@ -1,0 +1,10 @@
+enabled: false
+selfRoles: true
+joinableRoles: []
+logChannelId: ""
+managedRoleIds: []
+allowRoleRemoval: true
+requireRoleHierarchy: true
+reactionRoles: true
+buttonRoles: true
+maxRolesPerUser: 20
