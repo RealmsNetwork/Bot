@@ -1,0 +1,3 @@
+const { EmbedBuilder } = require('discord.js');
+async function initialize(client,config){const c=config.starboard||{};client.on('messageReactionAdd',async reaction=>{if(reaction.partial)await reaction.fetch().catch(()=>{});if(reaction.emoji.name!=='⭐'||reaction.count<(c.threshold||3)||!reaction.message?.guild)return;const out=client.channels.cache.get(c.channelId);if(!out?.isTextBased())return;const m=reaction.message;await out.send({embeds:[new EmbedBuilder().setAuthor({name:m.author?.tag||'User',iconURL:m.author?.displayAvatarURL()}).setDescription(m.content||'*No text*').addFields({name:'Jump',value:`[Open message](${m.url})`}).setColor(config.branding.embedColor)]}).catch(()=>{});});}
+module.exports={initialize};
