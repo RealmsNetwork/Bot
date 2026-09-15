@@ -1,0 +1,37 @@
+enabled: false
+api:
+  provider: restcountries
+  baseUrl: https://api.restcountries.com/countries/v5
+  apiKeyEnv: REST_COUNTRIES_API_KEY
+  cacheMinutes: 360
+  fields: "names.common,names.official,codes.alpha_2,codes.alpha_3,flag.emoji,flag.png,population,region,subregion,capitals,currencies,languages,timezones"
+collection:
+  collectibleName: countryball
+  pluralName: countryballs
+  spawnIntervalMinutes: [5, 15]
+  maxFavorites: 50
+  catchWindowSeconds: 25
+  duplicateReward: 1
+  startingCoins: 100
+  showRarity: true
+  statsFromPopulation: true
+  rarityTiers:
+    common: 60
+    uncommon: 25
+    rare: 10
+    epic: 4
+    legendary: 1
+ui:
+  embedColor: "#8b5cf6"
+  catchButtonLabel: "Catch me!"
+  caughtMessages:
+    - "{user} caught **{ball}**!"
+  wrongMessages:
+    - "That is not the right countryball."
+features:
+  trading: true
+  favorites: true
+  leaderboard: true
+  battles: false
+  daily: true
+  achievements: true
