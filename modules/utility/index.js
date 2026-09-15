@@ -8,8 +8,8 @@ const commands = [
   cmd('botinfo','Show bot information',async i=>i.reply({embeds:[new EmbedBuilder().setTitle('RealmsNetwork Bot').setColor(i.client.config.branding.embedColor).addFields({name:'Guilds',value:String(i.client.guilds.cache.size),inline:true},{name:'Commands',value:String(i.client.commands.size),inline:true},{name:'Node',value:process.version,inline:true})]})),
   cmd('userinfo','Show a member',async i=>{const u=i.options.getUser('user')||i.user;const m=i.guild?.members.cache.get(u.id);await i.reply({embeds:[new EmbedBuilder().setTitle(u.tag).setThumbnail(u.displayAvatarURL()).setDescription(m?`Joined: <t:${Math.floor(m.joinedTimestamp/1000)}:R>`:`ID: ${u.id}`).setColor(i.client.config.branding.embedColor)]})}),
   cmd('serverinfo','Show server information',async i=>i.reply({embeds:[new EmbedBuilder().setTitle(i.guild.name).setThumbnail(i.guild.iconURL()).setColor(i.client.config.branding.embedColor).addFields({name:'Members',value:String(i.guild.memberCount),inline:true},{name:'Channels',value:String(i.guild.channels.cache.size),inline:true},{name:'Roles',value:String(i.guild.roles.cache.size),inline:true})]})),
-  cmd('avatar','Show a user's avatar',async i=>{const u=i.options.getUser('user')||i.user;await i.reply(u.displayAvatarURL({size:1024}))}),
-  cmd('banner','Show a user's banner',async i=>{const u=await (i.options.getUser('user')||i.user).fetch();await i.reply(u.bannerURL({size:1024})||'No banner set.') }),
+  cmd('avatar','Show a user\'s avatar',async i=>{const u=i.options.getUser('user')||i.user;await i.reply(u.displayAvatarURL({size:1024}))}),
+  cmd('banner','Show a user\'s banner',async i=>{const u=await (i.options.getUser('user')||i.user).fetch();await i.reply(u.bannerURL({size:1024})||'No banner set.') }),
   cmd('membercount','Show member count',async i=>i.reply(`👥 ${i.guild.memberCount} members`)),
   cmd('channelinfo','Show current channel information',async i=>i.reply(`📺 <#${i.channelId}> • ${i.channel?.type}`)),
   cmd('roleinfo','Show a role',async i=>{const r=i.options.getRole('role');await i.reply(`${r} • ID: ${r.id} • ${r.members.size} members`)}),
@@ -20,7 +20,7 @@ const commands = [
   cmd('systeminfo','Show host statistics',async i=>i.reply(`CPU: ${os.cpus().length} cores\nRAM: ${(os.totalmem()/1073741824).toFixed(1)} GB\nLoad: ${os.loadavg().map(x=>x.toFixed(2)).join(' / ')}`))
 ];
 for (const c of commands) {
-  const opts = c.data.name === 'userinfo' || c.data.name === 'avatar' || c.data.name === 'banner' ? c.data.addUserOption(o=>o.setName('user').setDescription('User')) : c.data;
+  if (['userinfo','avatar','banner'].includes(c.data.name)) c.data.addUserOption(o=>o.setName('user').setDescription('User'));
   if (c.data.name === 'roleinfo') c.data.addRoleOption(o=>o.setName('role').setDescription('Role').setRequired(true));
   if (c.data.name === 'snowflake') c.data.addStringOption(o=>o.setName('id').setDescription('Snowflake').setRequired(true));
   if (c.data.name === 'choose') c.data.addStringOption(o=>o.setName('options').setDescription('A|B|C').setRequired(true));
