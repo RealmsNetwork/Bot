@@ -1,0 +1,15 @@
+enabled: false
+suggestions:
+  enabled: true
+  channelId: ""
+  reviewRoleIds: []
+reports:
+  enabled: true
+  channelId: ""
+  staffRoleIds: []
+polls:
+  enabled: true
+  defaultDurationMinutes: 60
+announcements:
+  enabled: true
+  allowedRoleIds: []
