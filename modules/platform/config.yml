@@ -1,4 +1,5 @@
-enabled: true
+enabled: false
+advanced: false
 help:
   enabled: true
 diagnostics:
