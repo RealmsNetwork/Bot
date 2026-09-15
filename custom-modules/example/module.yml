@@ -1,0 +1,17 @@
+name: hello-world
+enabled: true
+commands:
+  - name: hello
+    description: Say hello using the YAML module system
+    run:
+      - reply: "Hello {user.mention}! You are using a RealmsNetwork custom module."
+  - name: announce
+    description: Send an announcement to the current channel
+    permission: ManageMessages
+    options:
+      - name: message
+        type: string
+        description: Announcement text
+        required: true
+    run:
+      - send: "📢 {args}"
