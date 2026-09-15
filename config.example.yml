@@ -1,6 +1,6 @@
-# RealmsNetwork Bot V3
-# Root config: global runtime only. Every module owns its own config.yml.
-# All feature modules are OFF by default.
+# RealmsNetwork Bot V2 / V3 root configuration
+# Keep this file tiny. Built-in module settings live in modules/<name>/config.yml.
+# All modules are disabled by default.
 version: 3
 
 guildId: "YOUR_GUILD_ID_HERE"
@@ -11,17 +11,14 @@ branding:
   logColor: "#2B2D31"
   footer: "RealmsNetwork"
   supportUrl: "https://dsc.gg/realmsnetworksupport"
-  permissionDenied: "You do not have permission to use this command."
-  errorMessage: "Something went wrong while running that command."
   customBranding: true
 
 runtime:
   environment: production
   gracefulShutdown: true
   crashProtection: true
-  maxListeners: 50
+  maxListeners: 100
   cacheSize: 1000
-  telemetry: false
 
 commands:
   autoRefresh: true
@@ -87,30 +84,27 @@ ai:
   maxTokens: 1200
   maxInputLength: 6000
   cooldownSeconds: 3
+  retryDelayMs: 500
   fallbackProviders: [groq, openai_compatible]
   providers:
-    ollama:
-      baseUrl: http://127.0.0.1:11434/v1
-      model: llama3.2
-    openai:
-      baseUrl: https://api.openai.com/v1
-      model: gpt-5
-    groq:
-      baseUrl: https://api.groq.com/openai/v1
-      model: openai/gpt-oss-120b
-    mistral:
-      baseUrl: https://api.mistral.ai/v1
-      model: mistral-large-latest
-    anthropic:
-      baseUrl: https://api.anthropic.com
-      model: claude-sonnet
-    gemini:
-      model: gemini-2.5-flash
-    openai_compatible:
-      baseUrl: http://127.0.0.1:1234/v1
-      model: local-model
-      apiKeyEnv: OPENAI_COMPATIBLE_API_KEY
+    ollama: { baseUrl: http://127.0.0.1:11434/v1, model: llama3.2 }
+    lmstudio: { baseUrl: http://127.0.0.1:1234/v1, model: local-model }
+    openai: { baseUrl: https://api.openai.com/v1, model: gpt-5 }
+    groq: { baseUrl: https://api.groq.com/openai/v1, model: openai/gpt-oss-120b }
+    mistral: { baseUrl: https://api.mistral.ai/v1, model: mistral-large-latest }
+    deepseek: { baseUrl: https://api.deepseek.com/v1, model: deepseek-chat }
+    xai: { baseUrl: https://api.x.ai/v1, model: grok-4 }
+    together: { baseUrl: https://api.together.xyz/v1, model: meta-llama/Llama-3.3-70B-Instruct-Turbo }
+    openrouter: { baseUrl: https://openrouter.ai/api/v1, model: openai/gpt-4o-mini }
+    perplexity: { baseUrl: https://api.perplexity.ai, model: sonar }
+    cohere: { baseUrl: https://api.cohere.com/compatibility/v1, model: command-a-03-2025 }
+    huggingface: { baseUrl: https://router.huggingface.co/v1, model: meta-llama/Llama-3.3-70B-Instruct }
+    anthropic: { baseUrl: https://api.anthropic.com, model: claude-sonnet-4-5 }
+    gemini: { model: gemini-2.5-flash }
+    openai_compatible: { baseUrl: http://127.0.0.1:1234/v1, model: local-model, apiKeyEnv: OPENAI_COMPATIBLE_API_KEY }
 
+# Feature switches only. Detailed settings are owned by each module.
+aiLegacy: { enabled: false }
 security: { enabled: false }
 moderation: { enabled: false }
 automod: { enabled: false }
@@ -144,6 +138,3 @@ messageEmbedder: { enabled: false }
 highlights: { enabled: false }
 voiceLink: { enabled: false }
 music: { enabled: false }
-
-aichat: { enabled: false }
-honeypot: { enabled: false }
