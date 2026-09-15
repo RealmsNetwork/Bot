@@ -1,52 +1,65 @@
-# Dependencies / package managers
+# Dependencies
 node_modules/
+.npm/
+.pnpm-store/
+.yarn/
+
+# Secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+
+# Runtime configuration and state
+/config.yml
+/data/
+/logs/
+/cache/
+/tmp/
+/runtime/
+/backups/
+
+# Generated module state
+modules/**/data/
+modules/**/cache/
+custom-modules/**/data/
+custom-modules/**/cache/
+
+# Generated dependency/install metadata
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
-.npm/
-.pnpm-store/
+*.tsbuildinfo
 
-# Secrets / local configuration
-.env
-.env.*
-!.env.example
-config.yml
-modules/**/config.yml
-custom-modules/**/config.yml
-
-# Runtime state
-/data/
-*.db
-*.sqlite
-*.sqlite3
-*.log
-logs/
-tmp/
-temp/
-cache/
-
-# Generated backups / temporary atomic writes
-*.backup.*
-*.tmp
-*.swp
-*.swo
-*.pid
-
-# OS / editors
+# Editors / OS
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.example.json
 .DS_Store
 Thumbs.db
-.vscode/
-.idea/
-*.iml
-*.code-workspace
 
-# Coverage / build artifacts
+# Temporary/backup files
+*.tmp
+*.temp
+*.swp
+*.swo
+*.bak
+*.backup
+*.backup.*
+*.old
+*.orig
+
+# Coverage / reports
 coverage/
 .nyc_output/
-dist/
-build/
+reports/
 
-# Bot-specific generated state
-custom-modules/*/data/
-modules/*/data/
+# Local test overrides
+.env.test
+config.local.yml
