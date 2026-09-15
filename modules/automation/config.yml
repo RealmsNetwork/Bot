@@ -1,0 +1,8 @@
+enabled: false
+prefix: ""
+responses: {}
+rules: []
+rateLimit:
+  enabled: true
+  windowSeconds: 5
+  maxTriggers: 5
