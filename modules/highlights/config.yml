@@ -1,0 +1,9 @@
+enabled: false
+channelId: ""
+keywords: []
+caseSensitive: false
+cooldownSeconds: 15
+ignoreBots: true
+ignoreRoles: []
+includeAttachments: true
+includeEmbeds: false
