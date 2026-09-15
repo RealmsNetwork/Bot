@@ -1,0 +1,6 @@
+enabled: false
+leaveChannelId: ""
+joinChannelId: ""
+boostChannelId: ""
+announcementChannelId: ""
+mentionStaffOnCritical: false
