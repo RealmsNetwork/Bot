@@ -1,0 +1,13 @@
+enabled: false
+panelChannelId: ""
+categoryId: ""
+supportRoleIds: []
+transcriptChannelId: ""
+autoCloseMinutes: 0
+closeOnLeave: true
+claiming: true
+anonymousMode: false
+maxOpenPerUser: 1
+naming: "ticket-{user}"
+mentionSupport: true
+closeConfirm: true
