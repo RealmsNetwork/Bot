@@ -1,0 +1,16 @@
+enabled: false
+currency:
+  name: Coins
+  symbol: 🪙
+  startingBalance: 100
+  minBalance: 0
+rewards:
+  daily: 250
+  workMin: 50
+  workMax: 500
+  cooldownSeconds: 3600
+transfer:
+  enabled: true
+  feePercent: 0
+leaderboards:
+  pageSize: 10
