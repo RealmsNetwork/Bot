@@ -1,6 +1,6 @@
-# RealmsNetwork Bot
+# RealmsNetwork Bot v0.1
 
-RealmsNetwork Bot is a production/development Discord platform built around a small core and opt-in modules. The goal is a serious hoster/dev experience: predictable configuration, safe defaults, persistence, sharding, hot command refresh, custom modules, diagnostics and an optional web panel.
+RealmsNetwork Bot v0.1 is the first public release of a production/development Discord platform built around a small core and opt-in modules. The goal is a serious hoster/dev experience: predictable configuration, safe defaults, persistence, sharding, automatic command refresh, custom modules, diagnostics, voice tools and an optional admin panel.
 
 ## Architecture
 
@@ -19,41 +19,60 @@ enabled: false
 advanced: false
 ```
 
-When `advanced: true`, the loader creates that module's `advanced.yml` on first load. The generated file contains lifecycle, command overrides, prefix integration, permissions, UI, logging, event filters, limits, storage, scheduler, webhooks and arbitrary override sections. Existing `advanced.yml` files are never overwritten.
+When `advanced: true`, the loader creates that module's `advanced.yml` on first load. The generated file is intentionally comprehensive: lifecycle, command registration and overrides, prefix integration, permissions, UI/components, responses, embeds, event filters, rate limits, cooldowns, schedulers, storage/cache, HTTP, webhooks, logging, analytics, health, performance limits, security controls, localization, branding, sharding behavior and lifecycle hooks.
 
-This gives simple users a small config while giving advanced hosts a complete per-module control surface.
+Existing `advanced.yml` files are never overwritten. Simple users can stay in `config.yml`; advanced hosts get a full per-module control surface.
 
-## Commands and branding
+## Commands, prefixes and branding
 
-Application commands auto-refresh and auto-deploy by default. Per-module advanced settings can override command cooldowns, permission groups and enable/disable individual commands.
+Application commands auto-refresh and auto-deploy by default. Advanced module settings can override command cooldowns, permission groups, visibility and individual command enablement.
 
-The root config supports custom bot/server branding, embed colors, error messages, footer text and optional classic prefix commands. Prefix handling is disabled by default and custom JavaScript modules can register prefix handlers through the framework.
+The root configuration supports custom bot/server branding, embed colors, footer text, error/success messages and classic prefixes. Prefix handling is disabled by default. JavaScript modules can register prefix handlers through the framework.
+
+Core/platform responses use the same branding system instead of hard-coded RealmsNetwork UI text.
 
 ## Storage
 
 Supported persistence modes:
 
-- SQLite with WAL via `better-sqlite3` for single-instance/local production deployments.
+- SQLite with WAL via `better-sqlite3` for local/single-process production and development.
 - PostgreSQL, MySQL, MongoDB and Redis for shared/remote deployments.
-- Local JSON fallback when persistence is disabled or a configured backend is unavailable and fallback is allowed.
+- Local JSON fallback when persistence is disabled or an unavailable backend is explicitly allowed to fall back.
 
-SQLite is the default local backend. Remote database drivers are installed only when their backend is selected.
+SQLite is the default local backend. Optional remote drivers and module dependencies are installed only when the selected feature/backend is enabled.
 
 ## Sharding
 
-Sharding is optional. Explicit shard counts work with local SQLite. Automatic Discord-recommended shard detection is deliberately restricted to remote database deployments so multiple shard processes do not accidentally share a local SQLite file as their coordination store. discord.js supports `totalShards: 'auto'`; this project only enables that behavior through the guarded remote-database setting. citeturn2search0turn2search2
+Sharding is optional. Explicit shard counts work with SQLite. Automatic Discord-recommended shard detection is deliberately restricted to remote database deployments so multiple shard processes do not accidentally coordinate through a local SQLite file.
 
 ## Optional admin panel
 
-Set `adminPanel.enabled: true` and provide `DASHBOARD_TOKEN` to enable the built-in status UI. The default bind address is `127.0.0.1`, so production hosts can put Nginx/Caddy in front of it. The panel exposes authenticated status and health endpoints and is read-only by default.
+The dashboard is optional and disabled by default. It binds to `127.0.0.1` by default and requires `DASHBOARD_TOKEN`.
 
-For a serious public deployment, keep the panel behind HTTPS and a reverse proxy instead of exposing the raw bot process directly. Discord bot credentials remain environment variables rather than dashboard/config values. citeturn3search0turn3search2
+Read-only mode is the safe default. When explicitly changed to writable mode, the authenticated panel can reload commands and enable/disable first-party modules. Put it behind HTTPS and a reverse proxy for public administration.
+
+## Voice suite
+
+The unified `voice` module includes:
+
+- Music playback and queueing
+- URL/search playback
+- Queue, skip, stop, now-playing and volume controls
+- Text-to-speech using the configurable Edge TTS voice service
+- Temporary voice channels
+- Owner-only temporary VC control panel
+- Lock/unlock and hide/unhide
+- Owner transfer/claim
+- Member selection for kick/mute/deafen
+- Configurable room names, limits, bitrate, category, cleanup and permissions
+
+The voice stack is optional and does not load its dependencies until the module is enabled.
 
 ## Custom modules and scripting
 
 YAML modules provide a Skript-like declarative system for commands/events, arguments, conditions, variables, database values, HTTP JSON, embeds, role/channel actions, moderation actions, waits, reactions, DMs and nested actions. Inline JavaScript is opt-in and disabled by default.
 
-JavaScript modules are first-class and can use the full discord.js API plus shared database/framework services. Module dependencies can be declared in their configuration and are installed automatically by the bootstrapper.
+JavaScript modules are first-class and can use the full discord.js API plus shared database/framework services. Module dependencies can be declared in their configuration and are installed automatically when that module is enabled.
 
 ## AI
 
@@ -61,9 +80,9 @@ The AI router supports Ollama, LM Studio, OpenAI-compatible endpoints, OpenAI, G
 
 ## Built-in feature areas
 
-Moderation, mass actions, warnings, timeouts, purge and channel controls; automod and security traps; audit logging; welcome/autoroles; tickets; roles; giveaways; leveling; economy; reminders; starboard; community tools; forms; tags; AFK; autoresponders; feeds; highlights; utility/server/developer tools; AI; Countryballs; automation; and shard tools.
+Moderation, mass actions, warnings, timeouts, purge and channel controls; automod and security traps; audit logging; welcome/autoroles; tickets; roles; giveaways; leveling; economy; reminders; starboard; community tools; forms; tags; AFK; autoresponders; feeds; highlights; utility/server/developer tools; AI; Countryballs; automation; voice/music/TTS/temp VC; sharding and diagnostics.
 
-All feature modules are opt-in. The platform/help pack is also opt-in in V4.
+All feature modules are opt-in, including the platform/help pack.
 
 ## Development vs production
 
