@@ -8,15 +8,15 @@
     "dev": "nodemon index.js",
     "deploy": "node deploy-commands.js"
   },
-  "keywords": ["discord","bot","realmsnetwork","modular","sharding"],
+  "keywords": ["discord", "bot", "realmsnetwork", "modular", "sharding"],
   "author": "THEMPGUY",
   "license": "MIT",
   "repository": { "type": "git", "url": "https://github.com/RealmsNetwork/Bot" },
   "engines": { "node": ">=18.18.0" },
   "dependencies": {
     "discord.js": "14.27.0",
-    "dotenv": "17.2.2",
+    "dotenv": "17.4.2",
     "js-yaml": "4.1.0"
   },
-  "devDependencies": { "nodemon": "3.1.10" }
+  "devDependencies": { "nodemon": "3.1.14" }
 }
