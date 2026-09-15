@@ -1,36 +1,5 @@
 const { EmbedBuilder, PermissionFlagsBits, SlashCommandBuilder } = require('discord.js');
-
-function allowed(member, cfg) {
-  if (!member) return false;
-  if (cfg.ignoreBots && member.user?.bot) return false;
-  if (member.id === member.guild.ownerId) return false;
-  const role = cfg.staffRoleId || member.guild.client.config.staff?.roleId;
-  if (cfg.ignoreStaff !== false && role && member.roles.cache.has(role)) return false;
-  return true;
-}
-
-async function initialize(client, config, moduleConfig) {
-  const cfg = moduleConfig;
-  if (!cfg.channelId) return;
-  client.on('messageCreate', async message => {
-    if (!message.guild || message.channelId !== cfg.channelId || message.author?.bot) return;
-    const member = message.member || await message.guild.members.fetch(message.author.id).catch(() => null);
-    if (!allowed(member, cfg)) return;
-    if (cfg.deleteTriggerMessage !== false) await message.delete().catch(() => {});
-    const reason = cfg.reason || 'Triggered security trap';
-    const action = cfg.action || 'ban';
-    const log = client.channels.cache.get(cfg.logChannelId);
-    if (log?.isTextBased()) {
-      await log.send({ embeds: [new EmbedBuilder().setColor(cfg.color || config.branding.embedColor).setTitle('Security Trap Triggered').setDescription(`${message.author} triggered <#${message.channelId}>\nAction: **${action}**\nReason: ${reason}`).setTimestamp()] }).catch(() => {});
-    }
-    if (action === 'ban') await message.guild.members.ban(message.author.id, { reason }).catch(() => {});
-    else if (action === 'kick') await message.guild.members.kick(message.author.id, reason).catch(() => {});
-    else if (action === 'timeout') await member?.timeout(Number(cfg.timeoutDurationMs || 86400000), reason).catch(() => {});
-  });
-}
-
-const commands = [
-  { data: new SlashCommandBuilder().setName('security').setDescription('Security module tools').addSubcommand(s => s.setName('status').setDescription('Show security configuration')), permission: PermissionFlagsBits.ManageGuild, execute: async (i, client) => { const c = client.config.security || {}; await i.reply({ content: `Security: **${c.enabled === true ? 'enabled' : 'disabled'}**\nTrap channel: ${c.channelId ? `<#${c.channelId}>` : 'not configured'}\nAction: **${c.action || 'ban'}**`, ephemeral: true }); } }
-];
-
+function allowed(member, cfg) { if (!member) return false; if (member.id === member.guild.ownerId) return false; if (cfg.ignoreBots !== false && member.user?.bot) return false; if (cfg.ignoreStaff !== false && cfg.staffRoleId && member.roles.cache.has(String(cfg.staffRoleId))) return false; const me = member.guild.members.me; return !!me && me.roles.highest.comparePositionTo(member.roles.highest) > 0; }
+async function initialize(client, config, moduleConfig) { const cfg = moduleConfig; if (!cfg.channelId && !(cfg.patterns || []).length) return; const trap = async (message, reason = cfg.reason || 'Triggered security trap') => { if (!message.guild || message.author?.bot) return; const member = message.member || await message.guild.members.fetch(message.author.id).catch(() => null); if (!allowed(member, cfg)) return; if (cfg.deleteTriggerMessage !== false) await message.delete().catch(() => {}); const log = cfg.logChannelId ? await client.channels.fetch(cfg.logChannelId).catch(() => null) : null; if (log?.isTextBased()) await log.send({ embeds: [new EmbedBuilder().setColor(cfg.color || config.branding.embedColor).setTitle(cfg.logTitle || 'Security Triggered').setDescription(`${message.author} triggered the security system in ${message.channel}\nAction: **${cfg.action || 'ban'}**\nReason: ${reason}`).setTimestamp()] }).catch(() => {}); const action = cfg.action || 'ban'; if (action === 'ban') await member.ban({ reason }).catch(() => {}); else if (action === 'kick') await member.kick(reason).catch(() => {}); else if (action === 'timeout') await member.timeout(Number(cfg.timeoutDurationMs || 86400000), reason).catch(() => {}); }; client.on('messageCreate', async message => { if (cfg.channelId && message.channelId === String(cfg.channelId)) return trap(message); const patterns = cfg.patterns || []; if (patterns.some(pattern => { try { return new RegExp(String(pattern), 'i').test(message.content || ''); } catch { return false; } })) await trap(message, cfg.patternReason || cfg.reason); }); }
+const commands = [{ data: new SlashCommandBuilder().setName('security').setDescription('Security module tools').addSubcommand(s => s.setName('status').setDescription('Show security configuration')).addSubcommand(s => s.setName('test').setDescription('Check whether a member is punishable').addUserOption(o => o.setName('user').setDescription('Member').setRequired(true))), requiredPermission: PermissionFlagsBits.ManageGuild, execute: async (i, client) => { const c = client.config.security || {}; if (i.options.getSubcommand() === 'status') return i.reply({ content: `Security: **${c.enabled === true ? 'enabled' : 'disabled'}**\nTrap: ${c.channelId ? `<#${c.channelId}>` : 'none'}\nPatterns: **${c.patterns?.length || 0}**\nAction: **${c.action || 'ban'}**`, ephemeral: true }); const u = i.options.getUser('user', true); const m = await i.guild.members.fetch(u.id).catch(() => null); return i.reply({ content: `Punishable: **${allowed(m, c) ? 'yes' : 'no'}**`, ephemeral: true }); } }];
 module.exports = { initialize, commands };
