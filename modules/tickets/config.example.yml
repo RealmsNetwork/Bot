@@ -1,0 +1,10 @@
+enabled: false
+panelChannelId: ""
+categoryId: ""
+supportRoleIds: []
+transcriptChannelId: ""
+autoCloseMinutes: 0
+closeOnLeave: true
+claiming: true
+anonymousMode: false
+maxOpenPerUser: 1
