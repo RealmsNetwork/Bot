@@ -1,0 +1,7 @@
+enabled: false
+profileLookups: true
+memberSearch: true
+snowflakeTools: true
+httpTools: true
+embedTools: true
+maxOutputLength: 4000
