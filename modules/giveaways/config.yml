@@ -1,0 +1,15 @@
+enabled: false
+defaultWinners: 1
+maxWinners: 50
+entryEmoji: "🎉"
+endEmoji: "🏆"
+managerRoles: []
+allowedRoles: []
+ignoredRoles: []
+dmWinners: true
+reactions: false
+buttons: true
+rerollOnNoEligibleWinner: true
+minimumAccountAgeDays: 0
+minimumServerAgeDays: 0
+requireHuman: true
