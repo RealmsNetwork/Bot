@@ -1,0 +1,14 @@
+enabled: false
+logChannelId: ""
+deleteMessage: true
+warn: false
+timeoutMinutes: 0
+raidProtection: false
+mentionSpamLimit: 8
+messageSpam: { enabled: true, messages: 6, windowSeconds: 5 }
+duplicateMessages: { enabled: true, threshold: 3 }
+links: { enabled: false, allowlist: [], blockInvites: true }
+bannedWords: []
+blockedPatterns: []
+ignoredRoles: []
+ignoredChannels: []
