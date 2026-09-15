@@ -1,0 +1,11 @@
+enabled: false
+channelId: ""
+message: "Welcome {user} to {server}!"
+useEmbed: true
+embedTitle: "Welcome!"
+color: "#8b5cf6"
+autoRoleId: ""
+mentionUser: true
+sendDM: false
+dmMessage: "Welcome to {server}!"
+logChannelId: ""
