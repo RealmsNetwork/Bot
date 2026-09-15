@@ -1,0 +1,7 @@
+enabled: false
+math: true
+conversions: true
+textTools: true
+dateTime: true
+generation: true
+maxInputLength: 4000
