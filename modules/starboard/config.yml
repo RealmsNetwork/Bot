@@ -1,0 +1,9 @@
+enabled: false
+channelId: ""
+threshold: 3
+emoji: "⭐"
+ignoreBots: true
+ignoreChannels: []
+allowNSFW: false
+includeImages: true
+removeReactionOnPost: false
