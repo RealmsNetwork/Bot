@@ -64,8 +64,6 @@ sharding:
   respawn: true
   maxConcurrency: auto
 
-# SQLite is the default local production/development store. Automatic shard detection
-# is intentionally restricted to remote database modes.
 database:
   enabled: true
   primary: sqlite
@@ -102,6 +100,8 @@ adminPanel:
   tokenEnv: DASHBOARD_TOKEN
   public: false
   readOnly: true
+  allowReload: true
+  allowModuleToggle: true
 
 ai:
   enabled: false
@@ -116,7 +116,7 @@ ai:
   retryDelayMs: 500
   fallbackProviders: [groq, openai_compatible]
 
-# All feature modules are OFF until their own modules/<name>/config.yml enables them.
+# Every optional feature is disabled until its module config enables it.
 platform: { enabled: false }
 aiLegacy: { enabled: false }
 security: { enabled: false }
@@ -152,6 +152,4 @@ messageEmbedder: { enabled: false }
 highlights: { enabled: false }
 voiceLink: { enabled: false }
 voice: { enabled: false }
-music: { enabled: false }
-tts: { enabled: false }
 dashboard: { enabled: false }
