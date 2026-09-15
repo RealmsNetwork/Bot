@@ -1,0 +1,74 @@
+enabled: false
+advanced: false
+
+dependencies:
+  - "@discordjs/voice@0.19.2"
+  - "@discordjs/opus@0.10.0"
+  - "play-dl@1.9.7"
+  - "node-edge-tts@1.2.10"
+
+music:
+  enabled: true
+  searchLimit: 5
+  maxQueueSize: 100
+  maxTrackLengthSeconds: 7200
+  leaveWhenEmpty: true
+  leaveDelaySeconds: 60
+  defaultVolume: 100
+  maxVolume: 150
+  autoplay: false
+  announceNowPlaying: true
+  djRoleId: ""
+  restrictToRequester: false
+  sources:
+    youtube: true
+    soundcloud: true
+    spotifySearch: true
+    deezerSearch: true
+
+tts:
+  enabled: true
+  defaultVoice: en-US-AriaNeural
+  defaultLanguage: en-US
+  maxCharacters: 500
+  maxRate: 100
+  maxVolume: 100
+  cooldownSeconds: 3
+  allowUserVoiceSelection: true
+  allowPublicAudio: true
+
+temporaryVoice:
+  enabled: true
+  triggerChannelId: ""
+  categoryId: ""
+  nameTemplate: "{user}'s Room"
+  bitrate: 64000
+  userLimit: 0
+  autoDeleteEmpty: true
+  ownerOnlyControl: true
+  allowOwnerTransfer: true
+  allowOwnerKick: true
+  allowOwnerMute: true
+  allowOwnerDeafen: true
+  allowOwnerRename: true
+  allowOwnerLimit: true
+  allowOwnerBitrate: true
+  allowOwnerLock: true
+  allowOwnerUnlock: true
+  allowOwnerHide: true
+  allowOwnerUnhide: true
+  allowOwnerClaim: true
+  allowOwnerPanel: true
+  panelEphemeral: true
+  panelTimeoutSeconds: 300
+  defaultLocked: false
+  defaultHidden: false
+  syncPermissions: true
+  maxBitrate: 384000
+  cleanupIntervalSeconds: 30
+
+branding:
+  panelTitle: "Voice Control"
+  panelDescription: "Manage your temporary voice room."
+  musicTitle: "Music"
+  ttsTitle: "Text to Speech"
