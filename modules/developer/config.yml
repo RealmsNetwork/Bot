@@ -1,0 +1,7 @@
+enabled: false
+ownerIds: []
+maintenanceMode: false
+allowEval: false
+allowShell: false
+allowHttp: true
+debug: false
