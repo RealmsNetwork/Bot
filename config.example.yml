@@ -1,4 +1,4 @@
-# RealmsNetwork Bot V2
+# RealmsNetwork Bot V3
 # Root config: global runtime only. Every module owns its own config.yml.
 # All feature modules are OFF by default.
 version: 3
@@ -48,7 +48,6 @@ sharding:
   respawn: true
   maxConcurrency: auto
 
-# One selected persistence provider. Driver packages are loaded only when enabled.
 database:
   enabled: false
   primary: none
@@ -88,9 +87,30 @@ ai:
   maxTokens: 1200
   maxInputLength: 6000
   cooldownSeconds: 3
+  fallbackProviders: [groq, openai_compatible]
+  providers:
+    ollama:
+      baseUrl: http://127.0.0.1:11434/v1
+      model: llama3.2
+    openai:
+      baseUrl: https://api.openai.com/v1
+      model: gpt-5
+    groq:
+      baseUrl: https://api.groq.com/openai/v1
+      model: openai/gpt-oss-120b
+    mistral:
+      baseUrl: https://api.mistral.ai/v1
+      model: mistral-large-latest
+    anthropic:
+      baseUrl: https://api.anthropic.com
+      model: claude-sonnet
+    gemini:
+      model: gemini-2.5-flash
+    openai_compatible:
+      baseUrl: http://127.0.0.1:1234/v1
+      model: local-model
+      apiKeyEnv: OPENAI_COMPATIBLE_API_KEY
 
-# New canonical module names. Configure each module in modules/<name>/config.yml.
-aiLegacy: { enabled: false }
 security: { enabled: false }
 moderation: { enabled: false }
 automod: { enabled: false }
@@ -114,6 +134,7 @@ starboard: { enabled: false }
 automation: { enabled: false }
 developer: { enabled: false }
 countryballs: { enabled: false }
+engagement: { enabled: false }
 feeds: { enabled: false }
 forms: { enabled: false }
 afk: { enabled: false }
@@ -124,6 +145,5 @@ highlights: { enabled: false }
 voiceLink: { enabled: false }
 music: { enabled: false }
 
-# Kept as compatibility switches for older V1 configs.
 aichat: { enabled: false }
 honeypot: { enabled: false }
