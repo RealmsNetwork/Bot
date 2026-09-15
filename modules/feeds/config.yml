@@ -1,0 +1,6 @@
+enabled: false
+feeds: {}
+intervalSeconds: 300
+requestTimeoutMs: 10000
+maxItemsPerPoll: 5
+sendOnlyNew: true
