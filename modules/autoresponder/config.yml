@@ -1,0 +1,6 @@
+enabled: false
+rules: []
+ignoreBots: true
+ignoreWebhooks: true
+cooldownSeconds: 2
+maxResponseLength: 4000
