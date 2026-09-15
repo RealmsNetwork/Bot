@@ -1,0 +1,16 @@
+enabled: false
+afk:
+  enabled: true
+  clearOnMessage: true
+  mentionResponse: true
+  defaultMessage: "{user.mention} is AFK: {reason}"
+tags:
+  enabled: true
+  managerRoles: []
+  maxLength: 4000
+  allowEmbeds: true
+highlights:
+  enabled: false
+  keywords: []
+  channelId: ""
+  cooldownSeconds: 10
