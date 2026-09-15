@@ -1,0 +1,8 @@
+enabled: false
+information: true
+serverStats: true
+userStats: true
+networkStats: true
+snowflakes: true
+random: true
+system: true
