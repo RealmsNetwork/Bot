@@ -1,25 +1,100 @@
-# RealmsNetwork Bot Configuration
-# Edit these values before starting the bot.
+# RealmsNetwork Bot v2 configuration
+# Feature packs are deliberately OFF unless explicitly enabled.
+version: 2.0
 
-# The ID of your server (guild). Right-click the server icon and copy ID.
 guildId: "YOUR_GUILD_ID_HERE"
 
-# Custom branding used in all embeds and messages.
 branding:
   serverName: "RealmsNetwork"
   supportUrl: "https://dsc.gg/realmsnetworksupport"
-  embedColor: "#FF0000"
+  embedColor: "#8b5cf6"
   logColor: "#2B2D31"
 
-# Global staff role - shared across all modules.
+# Discord application ID used by slash-command deployment.
+commands:
+  autoDeploy: false
+  guildOnly: true
+
+# Multi-process Discord sharding. Keep disabled until you actually need it.
+sharding:
+  enabled: false
+  totalShards: auto
+  shardList: auto
+  respawn: true
+
+# Optional persistent storage. Set enabled=true and pick exactly one primary.
+# none = local JSON fallback in data/kv.json
+# mysql = mysql2
+# postgres = pg
+# mongodb = official MongoDB driver
+# redis = node-redis
+
+database:
+  enabled: false
+  primary: none
+  mysql:
+    url: ""
+    connectionLimit: 5
+  postgres:
+    url: ""
+    maxConnections: 5
+  mongodb:
+    url: ""
+    database: "realmsbot"
+  redis:
+    url: "redis://127.0.0.1:6379"
+
 staff:
   roleId: "YOUR_STAFF_ROLE_ID_HERE"
 
-# Honeypot module settings.
+developer:
+  ownerId: "YOUR_DISCORD_USER_ID_HERE"
+
+# Core command pack
+utility:
+  enabled: false
+moderation:
+  enabled: false
+community:
+  enabled: false
+server:
+  enabled: false
+economy:
+  enabled: false
+leveling:
+  enabled: false
+giveaways:
+  enabled: false
+tickets:
+  enabled: false
+roles:
+  enabled: false
+fun:
+  enabled: false
+developer:
+  enabled: false
+logging:
+  enabled: false
+  channelId: ""
+welcome:
+  enabled: false
+  channelId: ""
+  message: "Welcome {user} to {server}!"
+automod:
+  enabled: false
+  logChannelId: ""
+  deleteMessage: true
+  timeoutMinutes: 0
+  bannedWords: []
+automation:
+  enabled: false
+  responses: {}
+
+# Existing security/AI packs
 honeypot:
-  enabled: true
-  channelId: "YOUR_HONEYPOT_CHANNEL_ID_HERE"
-  logChannelId: "YOUR_LOG_CHANNEL_ID_HERE"
+  enabled: false
+  channelId: ""
+  logChannelId: ""
   punishment: "ban"
   ignoreBots: true
   ignoreWebhooks: true
@@ -29,39 +104,37 @@ honeypot:
   purgeOnStartup: true
   deleteTriggerMessage: true
   timeoutDuration: 86400000
-
   warningEmbed:
-    title: "<a:exclamation:1426253027693559991> WARNING <a:exclamation:1426253027693559991>"
+    title: "WARNING"
     color: null
     author:
       name: null
-    description: |
-      # Honeypot Security Channel
-
-      This channel is continuously monitored by {serverName}'s automated security system.
-
-      Any attempt to send messages, commands, images, stickers, GIFs, emojis, files, embeds, polls, or any other content will immediately trigger the honeypot.
-
-      Consequences:
-      - Permanent ban.
-      - Incident logged for staff review.
-      - No exceptions.
-
-      Do not interact with this channel for any reason.
-
-      Appeal: {supportUrl}
+    description: "This channel is monitored by {serverName}.\n\nAppeal: {supportUrl}"
     footer:
       text: null
 
-# ------------------------------------------------------------------
-# Gemini AI Chat module
-# ------------------------------------------------------------------
 aichat:
-  # Enable/disable this module completely.
-  enabled: true
-  channelId: "YOUR_CHAT_CHANNEL_ID_HERE"
+  enabled: false
+  channelId: ""
   maxInputLength: 2000
+  maxAttachments: 4
+  cooldownSeconds: 5
   fallbackMessage: "I couldn't generate a response. Please try again."
+  errorMessage: "Something went wrong while generating a response."
   model: "gemini-3.1-flash-lite"
-# Do not change or you will break the config.
-version: 1.7
+
+# Reserved packs for future add-on modules. They are intentionally disabled.
+music: { enabled: false }
+autorole: { enabled: false }
+starboard: { enabled: false }
+verification: { enabled: false }
+suggestions: { enabled: false }
+serverstats: { enabled: false }
+statuspage: { enabled: false }
+reminders: { enabled: false }
+notifications: { enabled: false }
+audit: { enabled: false }
+webhooks: { enabled: false }
+integrations: { enabled: false }
+feeds: { enabled: false }
+commands: { enabled: false }
