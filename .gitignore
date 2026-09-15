@@ -1,9 +1,52 @@
+# Dependencies / package managers
 node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.npm/
+.pnpm-store/
+
+# Secrets / local configuration
 .env
 .env.*
 !.env.example
 config.yml
-data/
+modules/**/config.yml
+custom-modules/**/config.yml
+
+# Runtime state
+/data/
+*.db
+*.sqlite
+*.sqlite3
+*.log
+logs/
+tmp/
+temp/
+cache/
+
+# Generated backups / temporary atomic writes
 *.backup.*
 *.tmp
-npm-debug.log*
+*.swp
+*.swo
+*.pid
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.iml
+*.code-workspace
+
+# Coverage / build artifacts
+coverage/
+.nyc_output/
+dist/
+build/
+
+# Bot-specific generated state
+custom-modules/*/data/
+modules/*/data/
