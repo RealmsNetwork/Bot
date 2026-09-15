@@ -1,17 +1,19 @@
 {
   "name": "realms-bot",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "RealmsNetwork production-grade modular Discord bot framework",
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
     "dev": "nodemon index.js",
     "deploy": "node deploy-commands.js",
+    "build:panel": "@tailwindcss/cli -i modules/dashboard/src/input.css -o modules/dashboard/public/admin.css --minify",
+    "advanced:sync": "node tools/sync-advanced.js",
     "check": "node tools/qc.js",
     "syntax": "node tools/qc.js --syntax",
     "health": "node tools/qc.js --health"
   },
-  "keywords": ["discord", "bot", "realmsnetwork", "modular", "sharding", "automation", "moderation", "ai", "sqlite", "music", "tts"],
+  "keywords": ["discord", "bot", "realmsnetwork", "modular", "sharding", "automation", "moderation", "ai", "sqlite", "mysql", "postgres", "mongodb", "redis", "admin-panel"],
   "author": "THEMPGUY",
   "license": "MIT",
   "repository": { "type": "git", "url": "https://github.com/RealmsNetwork/Bot" },
@@ -22,5 +24,9 @@
     "js-yaml": "4.1.0",
     "better-sqlite3": "13.0.3"
   },
-  "devDependencies": { "nodemon": "3.1.14" }
+  "devDependencies": {
+    "@tailwindcss/cli": "4.3.3",
+    "tailwindcss": "4.3.3",
+    "nodemon": "3.1.14"
+  }
 }

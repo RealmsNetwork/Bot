@@ -1,7 +1,7 @@
-# RealmsNetwork Bot v0.1 production/development configuration
-# Secrets belong in .env. Module behavior belongs in modules/<name>/config.yml.
+# RealmsNetwork Bot v0.2 advanced-capable configuration
+# Keep secrets in .env. Basic module behavior lives in modules/<name>/config.yml.
 version: 4
-release: "0.1.0"
+release: "0.2.0"
 
 guildId: "YOUR_GUILD_ID_HERE"
 
@@ -102,6 +102,10 @@ adminPanel:
   readOnly: true
   allowReload: true
   allowModuleToggle: true
+  allowConfigWrite: false
+
+# These are created automatically for every module and should not be removed.
+advancedFiles: true
 
 ai:
   enabled: false
@@ -116,7 +120,6 @@ ai:
   retryDelayMs: 500
   fallbackProviders: [groq, openai_compatible]
 
-# Every optional feature is disabled until its module config enables it.
 platform: { enabled: false }
 aiLegacy: { enabled: false }
 security: { enabled: false }
