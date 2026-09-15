@@ -1,0 +1,7 @@
+enabled: false
+maxPerUser: 100
+maxMessageLength: 1000
+allowRecurring: true
+minDelaySeconds: 10
+maxDelaySeconds: 31536000
+mentionUser: true
