@@ -1,0 +1,7 @@
+enabled: false
+clearOnMessage: true
+mentionResponse: true
+defaultReason: "AFK"
+message: "{user.mention} is AFK: {reason}"
+logChannelId: ""
+maxReasonLength: 200
