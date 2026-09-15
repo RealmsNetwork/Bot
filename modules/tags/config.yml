@@ -1,0 +1,6 @@
+enabled: false
+managerRoles: []
+maxLength: 4000
+allowEveryoneToRead: true
+allowUsersToCreate: false
+cooldownSeconds: 3
