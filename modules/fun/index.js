@@ -1,0 +1,10 @@
+const { SlashCommandBuilder } = require('discord.js');
+const make=(d,e)=>({data:d,execute:e});
+const commands=[
+ make(new SlashCommandBuilder().setName('8ball').setDescription('Ask the magic 8-ball').addStringOption(o=>o.setName('question').setDescription('Question').setRequired(true)),async i=>i.reply(['🎱 Yes.','🎱 No.','🎱 Maybe.','🎱 Ask again later.'][Math.floor(Math.random()*4)])),
+ make(new SlashCommandBuilder().setName('reverse').setDescription('Reverse text').addStringOption(o=>o.setName('text').setDescription('Text').setRequired(true)),async i=>i.reply(i.options.getString('text',true).split('').reverse().join(''))),
+ make(new SlashCommandBuilder().setName('rate').setDescription('Rate something').addStringOption(o=>o.setName('thing').setDescription('Thing').setRequired(true)),async i=>i.reply(`⭐ ${i.options.getString('thing',true)}: **${Math.floor(Math.random()*101)}%**`)),
+ make(new SlashCommandBuilder().setName('ship').setDescription('Ship two users').addUserOption(o=>o.setName('one').setDescription('User').setRequired(true)).addUserOption(o=>o.setName('two').setDescription('User').setRequired(true)),async i=>i.reply(`💖 ${i.options.getUser('one',true)} + ${i.options.getUser('two',true)} = **${Math.floor(Math.random()*101)}%**`)),
+ make(new SlashCommandBuilder().setName('number').setDescription('Generate a random number').addIntegerOption(o=>o.setName('min').setDescription('Minimum').setRequired(true)).addIntegerOption(o=>o.setName('max').setDescription('Maximum').setRequired(true)),async i=>{const a=i.options.getInteger('min',true),b=i.options.getInteger('max',true);if(b<a)return i.reply({content:'Max must be >= min.',ephemeral:true});await i.reply(`🔢 ${Math.floor(Math.random()*(b-a+1))+a}`)}),
+ make(new SlashCommandBuilder().setName('joke').setDescription('Tell a quick joke'),async i=>i.reply(['Why did the bot cross the API? To get to the other endpoint.','I tried to optimize my code. It was already running in production.','404: Joke found, delivery pending.'][Math.floor(Math.random()*3)]))
+];module.exports={commands};
