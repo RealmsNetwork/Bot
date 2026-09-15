@@ -1,0 +1,7 @@
+enabled: false
+cooldowns:
+  globalSeconds: 2
+nsfw: false
+imageCommands: false
+games: true
+randomness: true
