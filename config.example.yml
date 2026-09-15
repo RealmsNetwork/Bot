@@ -44,6 +44,7 @@ developer:
 
 utility: { enabled: false }
 extended: { enabled: false }
+misc: { enabled: false }
 moderation: { enabled: false }
 community: { enabled: false, suggestionChannelId: "", reportChannelId: "" }
 server: { enabled: false }
