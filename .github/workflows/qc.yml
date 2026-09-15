@@ -16,11 +16,17 @@ jobs:
           node-version: 22
       - name: Install
         run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Build local admin panel assets
+        run: npm run build:panel
+      - name: Verify admin panel assets
+        run: test -s modules/dashboard/public/admin.css && test -s modules/dashboard/web/app.js && ! grep -R "cdn.tailwindcss.com\|https://cdn.tailwindcss.com" modules/dashboard --exclude='*.map'
+      - name: Verify advanced module configs
+        run: node -e "const fs=require('fs'); const dirs=fs.readdirSync('modules',{withFileTypes:true}).filter(x=>x.isDirectory()); const missing=dirs.filter(x=>!fs.existsSync('modules/'+x.name+'/advanced.yml')); if(missing.length){console.error('Missing advanced.yml:',missing);process.exit(1)} console.log('advanced.yml present for '+dirs.length+' modules')"
       - name: Syntax and configuration QC
         run: npm run check
       - name: Runtime import smoke test
         run: node -e "require('./lib/database'); require('./lib/config'); require('./lib/module-loader'); require('./lib/custom-dsl'); console.log('Core imports ok')"
       - name: Validate package metadata
-        run: node -e "const p=require('./package.json'); if(!p.dependencies['better-sqlite3']||!p.scripts.check) process.exit(1); console.log('package metadata ok')"
+        run: node -e "const p=require('./package.json'); if(!p.dependencies['better-sqlite3']||!p.scripts.check||!p.scripts['build:panel']) process.exit(1); console.log('package metadata ok')"
       - name: Validate custom YAML module
         run: node -e "const fs=require('fs'),yaml=require('js-yaml'); const x=yaml.load(fs.readFileSync('custom-modules/example/module.yml','utf8')); if(!x||!Array.isArray(x.commands)||!x.commands.length) process.exit(1); console.log('custom module ok')"
