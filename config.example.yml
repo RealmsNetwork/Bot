@@ -1,6 +1,7 @@
-# RealmsNetwork Bot production/development configuration
+# RealmsNetwork Bot v0.1 production/development configuration
 # Secrets belong in .env. Module behavior belongs in modules/<name>/config.yml.
 version: 4
+release: "0.1.0"
 
 guildId: "YOUR_GUILD_ID_HERE"
 
@@ -11,9 +12,13 @@ branding:
   logColor: "#2B2D31"
   footer: "RealmsNetwork"
   supportUrl: "https://dsc.gg/realmsnetwork"
+  iconUrl: ""
+  logoUrl: ""
   customBranding: true
+  showModuleNames: false
   permissionDenied: "You do not have permission to use this command."
   errorMessage: "Something went wrong while running that command."
+  successMessage: "Done."
 
 runtime:
   environment: production
@@ -30,6 +35,7 @@ prefix:
   prefixes: ["!"]
   mentionPrefix: true
   errorMessage: "Command failed. Check the syntax and try again."
+  includeBrandPrefixInMessages: true
 
 commands:
   autoRefresh: true
@@ -58,6 +64,8 @@ sharding:
   respawn: true
   maxConcurrency: auto
 
+# SQLite is the default local production/development store. Automatic shard detection
+# is intentionally restricted to remote database modes.
 database:
   enabled: true
   primary: sqlite
@@ -143,5 +151,7 @@ autoresponder: { enabled: false }
 messageEmbedder: { enabled: false }
 highlights: { enabled: false }
 voiceLink: { enabled: false }
+voice: { enabled: false }
 music: { enabled: false }
+tts: { enabled: false }
 dashboard: { enabled: false }
