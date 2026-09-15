@@ -1,0 +1,13 @@
+enabled: false
+channelId: ""
+logChannelId: ""
+action: ban
+reason: "Triggered security trap"
+staffRoleId: ""
+ignoreBots: true
+ignoreStaff: true
+deleteTriggerMessage: true
+color: "#8b5cf6"
+timeoutDurationMs: 86400000
+permissions:
+  status: manage_guild
