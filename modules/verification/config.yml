@@ -1,0 +1,9 @@
+enabled: false
+roleId: ""
+verifiedChannelId: ""
+unverifiedRoleId: ""
+buttonLabel: "Verify"
+buttonEmoji: "✅"
+requireButton: true
+removeUnverifiedRole: true
+logChannelId: ""
