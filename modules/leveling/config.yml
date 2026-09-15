@@ -1,0 +1,9 @@
+enabled: false
+xpPerMessage: [5, 15]
+messageCooldownSeconds: 30
+xpPerReaction: 2
+levelUpMessage: "🎉 {user.mention} reached level **{level}**!"
+levelRoles: {}
+ignoredChannels: []
+ignoredRoles: []
+leaderboardPageSize: 10
