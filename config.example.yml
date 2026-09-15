@@ -1,6 +1,6 @@
-# RealmsNetwork Bot V2 / V3 root configuration
-# Keep this file tiny. Built-in module settings live in modules/<name>/config.yml.
-# All modules are disabled by default.
+# RealmsNetwork Bot V3 root configuration
+# Global runtime only. Module behavior belongs in modules/<name>/config.yml.
+# All feature modules are OFF by default except the tiny platform/help pack.
 version: 3
 
 guildId: "YOUR_GUILD_ID_HERE"
@@ -27,6 +27,7 @@ commands:
   guildOnly: true
   clearRemoved: true
   syncOnReady: true
+  defaultCooldownSeconds: 0
 
 permissions:
   ownerBypass: true
@@ -49,23 +50,16 @@ database:
   enabled: false
   primary: none
   fallbackToLocal: true
-  mysql:
-    url: ""
-    connectionLimit: 5
-  postgres:
-    url: ""
-    maxConnections: 5
-  mongodb:
-    url: ""
-    database: "realmsbot"
-  redis:
-    url: "redis://127.0.0.1:6379"
-    keyPrefix: "realmsbot:"
+  mysql: { url: "", connectionLimit: 5 }
+  postgres: { url: "", maxConnections: 5 }
+  mongodb: { url: "", database: "realmsbot" }
+  redis: { url: "redis://127.0.0.1:6379", keyPrefix: "realmsbot:" }
 
 migration:
   enabled: true
   backupLegacyConfig: true
   keepLegacyAliases: true
+  migrateModuleConfigs: true
 
 customModules:
   enabled: true
@@ -73,6 +67,10 @@ customModules:
   watch: true
   allowJavaScript: true
   allowYaml: true
+  allowInlineJS: false
+  maxActionsPerRun: 250
+  maxLoopIterations: 100
+  maxWaitMs: 30000
 
 ai:
   enabled: false
@@ -103,7 +101,9 @@ ai:
     gemini: { model: gemini-2.5-flash }
     openai_compatible: { baseUrl: http://127.0.0.1:1234/v1, model: local-model, apiKeyEnv: OPENAI_COMPATIBLE_API_KEY }
 
-# Feature switches only. Detailed settings are owned by each module.
+# First-party module switches. Detailed settings live beside each module.
+platform: { enabled: true }
+ai: { enabled: false }
 aiLegacy: { enabled: false }
 security: { enabled: false }
 moderation: { enabled: false }
@@ -131,7 +131,7 @@ countryballs: { enabled: false }
 engagement: { enabled: false }
 feeds: { enabled: false }
 forms: { enabled: false }
-afk: { enabled: false }
+af k: { enabled: false }
 tags: { enabled: false }
 autoresponder: { enabled: false }
 messageEmbedder: { enabled: false }
