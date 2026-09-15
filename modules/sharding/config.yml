@@ -1,0 +1,5 @@
+enabled: false
+showStatusCommand: true
+includeGuilds: true
+includeLatency: true
+includeMemory: true
