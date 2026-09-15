@@ -1,0 +1,3 @@
+const { SlashCommandBuilder } = require('discord.js');
+const command={data:new SlashCommandBuilder().setName('shards').setDescription('Show shard statistics'),async execute(i){if(!i.client.shard)return i.reply('🧩 Sharding is not enabled.');const [guilds,users]=await Promise.all([i.client.shard.fetchClientValues('guilds.cache.size'),i.client.shard.broadcastEval(c=>c.guilds.cache.reduce((n,g)=>n+g.memberCount,0))]);await i.reply(`🧩 Shards: **${i.client.shard.count}**\nGuilds: **${guilds.reduce((a,b)=>a+b,0)}**\nMembers: **${users.reduce((a,b)=>a+b,0)}**`);}};
+module.exports={commands:[command]};
