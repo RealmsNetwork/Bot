@@ -10,7 +10,7 @@ if (!fs.existsSync(configFile) && fs.existsSync(exampleConfig)) fs.copyFileSync(
 
 const yaml = require('js-yaml');
 const config = yaml.load(fs.readFileSync(configFile, 'utf8')) || {};
-const packages = new Set(['discord.js@14.27.0', 'dotenv@17.2.2', 'js-yaml@4.1.0']);
+const packages = new Set(['discord.js@14.27.0', 'dotenv@17.4.2', 'js-yaml@4.1.0']);
 if (config.aichat?.enabled) packages.add('@google/generative-ai@0.1.3');
 if (config.database?.enabled) {
   if (config.database.primary === 'mysql') packages.add('mysql2@3.24.4');
@@ -30,7 +30,8 @@ function ensurePackage(spec) {
   try { require.resolve(packageName(spec)); return true; } catch {}
   console.log(`[Bootstrap] Installing ${spec}`);
   const npm = process.env.npm_execpath || 'npm';
-  const result = spawnSync(npm, ['install', '--no-audit', '--no-fund', '--save-exact', spec], { cwd: root, stdio: 'inherit', shell: process.platform === 'win32' });
+  const args = ['install', '--no-audit', '--no-fund', '--save-exact', spec];
+  const result = spawnSync(process.platform === 'win32' && npm.endsWith('.js') ? process.execPath : npm, process.platform === 'win32' && npm.endsWith('.js') ? [npm, ...args] : args, { cwd: root, stdio: 'inherit' });
   return result.status === 0;
 }
 for (const pkg of packages) if (!ensurePackage(pkg)) console.warn(`[Bootstrap] Could not install ${pkg}; related features may stay unavailable.`);
