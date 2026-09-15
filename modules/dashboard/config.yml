@@ -5,3 +5,5 @@ host: 127.0.0.1
 tokenEnv: DASHBOARD_TOKEN
 public: false
 readOnly: true
+allowReload: true
+allowModuleToggle: true
