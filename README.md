@@ -1,78 +1,49 @@
-# RealmsNetwork Bot V3
+# RealmsNetwork Bot
 
-RealmsNetwork Bot is a config-first, modular Discord bot platform built to cover moderation, automation, community, utility, economy, AI, security, games, and server-management workloads without making the core process depend on every optional feature.
+A self-hostable, config-first Discord platform built to cover moderation, automation, community, utility, economy, AI, security, games and server-management workloads without forcing every optional feature into the base runtime.
 
-## Runtime
+## Layout
 
-- `index.js` is bootstrap only. It creates missing local configuration, discovers optional package requirements, installs only what enabled modules need, and starts either one process or Discord sharding.
-- `main.js` owns the client, persistence facade, command router, permissions, module lifecycle, automatic command synchronization, and shutdown.
-- `lib/` contains reusable infrastructure.
-- `modules/<name>/` contains first-party modules.
-- `custom-modules/<name>/module.yml` can define a module without writing JavaScript.
+- `index.js` is bootstrap only.
+- `main.js` owns the Discord runtime, command registry, permissions, persistence and shutdown.
+- `lib/` contains reusable framework services.
+- `modules/<name>/` contains first-party modules. Edit `config.yml` directly.
+- `custom-modules/<name>/` contains your own YAML or JavaScript modules.
 
-## Configuration
+## Host/editor experience
 
-The root `config.yml` contains global runtime settings. Each module gets its own `config.yml` automatically from `config.example.yml` when the bot starts. Module configuration is ignored until that module is enabled.
+The root configuration is deliberately small. Built-in modules own their behavior in `modules/<name>/config.yml`; missing configs are generated as `config.yml` with disabled-safe defaults. You do not need to rename `config.example.yml` files for individual modules.
 
-Command synchronization is automatic by default. The bot detects changes to command definitions and re-syncs the configured application command scope without requiring a manual refresh variable or command.
+Commands automatically refresh and deploy by default. Changing a command definition, option or enabled module is detected by the runtime, so normal hosts do not need to manually run a command refresh step.
 
-## Permissions
+## Custom modules
 
-Permissions are layered. A command can use native Discord permissions, role groups, users, roles, channels, allow-lists, deny-lists, and owner bypass. Server owners can keep a global emergency bypass while individual commands remain independently configurable.
+YAML modules provide a Skript-like system for commands and events. You can use arguments, conditions, variables, database values, HTTP JSON requests, embeds, role actions, moderation actions, waits, reactions, DMs and nested actions.
 
-Discord also supports application command permission overwrites by role/member/channel from the server Integration settings.
-
-## Persistence
-
-`database.enabled` is `false` by default. Available adapters are `none`, `mysql`, `postgres`, `mongodb`, and `redis`. Provider drivers are installed lazily. Local JSON storage is used as the zero-dependency fallback.
+JavaScript modules are first-class too. Put `module.js` or `index.js` in a custom module directory plus `config.yml`. JS modules can use the full discord.js API and shared bot services.
 
 ## AI
 
-The canonical `ai` module supports direct HTTP integrations for OpenAI, Groq, Mistral, Anthropic, Gemini, Ollama, and arbitrary OpenAI-compatible endpoints. This also covers many hosted and local runtimes without forcing every SDK into the base installation. Providers can be chained with fallbacks.
+The AI router supports Ollama, LM Studio, OpenAI-compatible endpoints, OpenAI, Groq, Mistral, DeepSeek, xAI, Together, OpenRouter, Perplexity, Cohere, Hugging Face, Anthropic and Gemini. HTTP adapters are preferred so optional provider SDKs do not bloat the base installation.
 
-## No-code modules
+## Storage
 
-Create a folder under `custom-modules/`, add `module.yml`, and enable it. Example syntax:
+Optional providers: MySQL, PostgreSQL, MongoDB and Redis. With persistence disabled, the bot falls back to a small local JSON store. Optional database drivers are installed only when required.
 
-```yaml
-name: hello-world
-enabled: true
-commands:
-  - name: hello
-    description: Say hello
-    run:
-      - reply: "Hello {user.mention}!"
+## Countryballs
 
-  - name: announce
-    description: Send an announcement
-    permission: ManageMessages
-    options:
-      - name: message
-        type: string
-        description: Announcement text
-        required: true
-    run:
-      - send: "📢 {args}"
+The Countryballs system uses a configurable live country data source instead of a hardcoded fake collection. The bundled adapter targets REST Countries, which exposes normalized country names, ISO codes, flags, capitals, currencies, languages, population, regions and other fields. Results are cached so normal gameplay does not spam the API.
 
-events:
-  messageCreate:
-    contains: "hello bot"
-    run:
-      - send: "Hello {user.mention}!"
-```
+## Platform coverage
 
-The DSL supports commands, options, permissions, replies, sends, DMs, reactions, role changes, timeouts, waits, logging, and message/event triggers. JavaScript modules are still available for anything that needs full programmatic control.
-
-## Included platform areas
-
-Moderation, mass banning, warnings, timeouts, purge and channel controls; automod; logging; welcomes and autoroles; tickets; reaction/self roles; giveaways; leveling; economy; reminders; starboard; community tools; automation; AI; security traps; shard tools; utility packs; engagement/AFK/tags; Countryballs collection gameplay; and compatibility aliases for the previous `aichat` and `honeypot` module names.
+Moderation, mass banning, warnings, timeouts, purge and channel controls; automod and security traps; audit/action logging; welcome/autoroles; tickets; reaction/self roles; giveaways; leveling; economy; reminders; starboard; community tools; forms; tags; AFK; autoresponders; feeds; highlights; voice linking; music; notifications; utility/server/developer tools; AI; Countryballs; automation; shard tools; and compatibility aliases for legacy modules.
 
 ## Migration
 
-V1/V2 root settings are migrated automatically. `commandDeployment` maps to `commands`, `aichat` maps to `ai`, and `honeypot` maps to `security`. Module settings are preserved when their new per-module config is first generated. See `MIGRATIONS.md`.
+The runtime supports legacy root configuration names and migration. `commandDeployment` maps to `commands`, `aichat` maps to `ai`, `honeypot` maps to the security module, and old module settings are preserved as the per-module configuration is generated. See `MIGRATIONS.md`.
 
 ## Quality control
 
-Run `npm run check` to syntax-check JavaScript and parse every YAML file. GitHub Actions performs the same validation on pushes and pull requests.
+`npm run check` validates JavaScript syntax and YAML. GitHub Actions performs installation, syntax checks and configuration validation on pushes and pull requests.
 
-Never commit real tokens, API keys, or database credentials.
+Keep real tokens, API keys and database credentials in `.env` and never commit them.
