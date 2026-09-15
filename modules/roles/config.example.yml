@@ -1,0 +1,7 @@
+enabled: false
+selfRoles: true
+joinableRoles: []
+logChannelId: ""
+managedRoleIds: []
+allowRoleRemoval: true
+requireRoleHierarchy: true
