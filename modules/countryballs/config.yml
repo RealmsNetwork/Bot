@@ -1,20 +1,22 @@
 enabled: false
 api:
-  provider: restcountries
+  provider: restcountries-v5
   baseUrl: https://api.restcountries.com/countries/v5
   apiKeyEnv: REST_COUNTRIES_API_KEY
+  useDemoKeyWhenUnset: true
   cacheMinutes: 360
-  fields: "names.common,names.official,codes.alpha_2,codes.alpha_3,flag.emoji,flag.png,population,region,subregion,capitals,currencies,languages,timezones"
+  fields: "names.common,names.official,codes.alpha_2,codes.alpha_3,flag.emoji,flag.png,population,region,subregion,continents,borders,capitals,currencies,languages,timezones,demonyms"
 collection:
   collectibleName: countryball
   pluralName: countryballs
-  spawnIntervalMinutes: [5, 15]
   maxFavorites: 50
+  spawnIntervalMinutes: [5, 15]
   catchWindowSeconds: 25
-  duplicateReward: 1
   startingCoins: 100
+  catchCost: 10
+  duplicateReward: 1
+  maxCollectionSize: 10000
   showRarity: true
-  statsFromPopulation: true
   rarityTiers:
     common: 60
     uncommon: 25
@@ -35,3 +37,4 @@ features:
   battles: false
   daily: true
   achievements: true
+  countryProfiles: true
