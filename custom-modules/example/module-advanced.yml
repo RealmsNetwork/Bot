@@ -1,0 +1,53 @@
+# Copy this file to custom-modules/<name>/module.yml to make a YAML module.
+name: advanced-example
+enabled: false
+commands:
+  - name: greetif
+    description: Conditional greeting example
+    run:
+      - if:
+          hasPermission: ManageMessages
+        then:
+          - reply: "Moderator hello, {user.mention}!"
+        else:
+          - reply: "Hello, {user.mention}!"
+  - name: count
+    description: Store and increment a per-server counter
+    run:
+      - dbIncrement:
+          key: "custom:count"
+          name: count
+          amount: 1
+      - reply: "This module has been used **{var.count}** times in this server."
+  - name: repeat
+    description: Repeat a message several times
+    options:
+      - name: text
+        type: string
+        description: Text to repeat
+        required: true
+      - name: times
+        type: integer
+        description: Number of repetitions
+        min: 1
+        max: 5
+        required: true
+    run:
+      - set:
+          name: output
+          value: ""
+      - foreach:
+          values: "$args"
+          as: item
+          separator: "|"
+          run:
+            - append:
+                name: output
+                value: "{var.item} "
+      - reply: "{var.output}"
+  - name: advanced-js
+    description: Run opt-in inline JavaScript
+    run:
+      - executeJS: |
+          ctx.vars.message = `Hello ${interaction.user.tag}`;
+      - reply: "{var.message}"
