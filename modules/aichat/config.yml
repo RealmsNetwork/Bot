@@ -1,0 +1,6 @@
+enabled: false
+# Legacy alias: use modules/ai/config.yml for new installations.
+channelId: ""
+maxInputLength: 6000
+cooldownSeconds: 3
+systemPrompt: "You are a helpful Discord assistant."
