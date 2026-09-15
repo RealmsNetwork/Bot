@@ -1,37 +1,22 @@
 {
   "name": "realms-bot",
-  "version": "1.0.1",
-  "description": "A multi-module Discord bot for RealmsNetwork, featuring a honeypot security module and more.",
+  "version": "2.0.0",
+  "description": "RealmsNetwork modular Discord bot",
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
-    "dev": "nodemon index.js"
+    "dev": "nodemon index.js",
+    "deploy": "node deploy-commands.js"
   },
-  "keywords": [
-    "discord",
-    "bot",
-    "security",
-    "honeypot",
-    "moderation",
-    "multi-module",
-    "all-in-one"
-  ],
+  "keywords": ["discord","bot","realmsnetwork","modular","sharding"],
   "author": "THEMPGUY",
   "license": "MIT",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/RealmsNetwork/Bot"
-  },
-  "engines": {
-    "node": ">=16.9.0"
-  },
+  "repository": { "type": "git", "url": "https://github.com/RealmsNetwork/Bot" },
+  "engines": { "node": ">=18.18.0" },
   "dependencies": {
-    "discord.js": "^14.14.1",
-    "dotenv": "^16.3.1",
-    "js-yaml": "^4.1.0",
-    "@google/generative-ai": "^0.1.3"
+    "discord.js": "14.27.0",
+    "dotenv": "17.2.2",
+    "js-yaml": "4.1.0"
   },
-  "devDependencies": {
-    "nodemon": "^3.0.3"
-  }
+  "devDependencies": { "nodemon": "3.1.10" }
 }
