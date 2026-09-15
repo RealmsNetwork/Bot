@@ -43,6 +43,7 @@ developer:
   ownerId: "YOUR_DISCORD_USER_ID_HERE"
 
 utility: { enabled: false }
+extended: { enabled: false }
 moderation: { enabled: false }
 community: { enabled: false, suggestionChannelId: "", reportChannelId: "" }
 server: { enabled: false }
@@ -68,6 +69,21 @@ automod:
 automation:
   enabled: false
   responses: {}
+autorole:
+  enabled: false
+  roleId: ""
+reminders:
+  enabled: false
+verification:
+  enabled: false
+  roleId: ""
+starboard:
+  enabled: false
+  channelId: ""
+  threshold: 3
+notifications:
+  enabled: false
+  leaveChannelId: ""
 
 honeypot:
   enabled: false
@@ -102,15 +118,3 @@ aichat:
   model: "gemini-3.1-flash-lite"
 
 music: { enabled: false }
-autorole: { enabled: false }
-starboard: { enabled: false }
-verification: { enabled: false }
-suggestions: { enabled: false }
-serverstats: { enabled: false }
-statuspage: { enabled: false }
-reminders: { enabled: false }
-notifications: { enabled: false }
-audit: { enabled: false }
-webhooks: { enabled: false }
-integrations: { enabled: false }
-feeds: { enabled: false }
