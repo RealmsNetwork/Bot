@@ -1,0 +1,16 @@
+enabled: false
+channelId: ""
+ignoreBots: false
+messageDelete: true
+messageEdit: true
+memberJoin: true
+memberLeave: true
+memberUpdate: true
+moderation: true
+roles: true
+channels: true
+voice: true
+threads: true
+server: true
+commands: true
+webhooks: true
