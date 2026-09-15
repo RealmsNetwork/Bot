@@ -1,16 +1,38 @@
-# RealmsNetwork Bot V3 migration
+# RealmsNetwork Bot V2/V3 migrations
 
-The bot now migrates old root configuration automatically.
+## Automatic migrations
+The runtime upgrades the root configuration when needed and keeps a backup before changing it.
 
-| Legacy | V3 |
-| --- | --- |
-| `commandDeployment` | `commands` |
-| `aichat` | `ai` |
-| `honeypot` | `security` |
-| root module settings | `modules/<module>/config.yml` |
+### V1 -> V2/V3
+- `aichat` is a compatibility alias for the new `ai` module.
+- `honeypot` is a compatibility alias for the new security system.
+- `commandDeployment.autoDeploy` becomes `commands.autoDeploy`.
+- Root feature settings become `modules/<name>/config.yml`.
+- Missing module configs are created automatically as `config.yml` with `enabled: false`.
 
-Before a versioned migration, the loader writes a timestamped `config.yml.backup.<timestamp>` copy.
+## Module config migration
+Built-in module settings are no longer stored in the root file. Move the values from the old root section into the matching module's `config.yml`.
 
-Each installed module receives its own `config.yml` automatically from `config.example.yml`. Existing legacy settings are preserved when the file is first created.
+Example:
 
-The migration does not copy secrets from source control. API keys stay in `.env` or the provider's configured secret environment variable.
+```yaml
+# old root config
+moderation:
+  enabled: true
+  logChannelId: "123"
+```
+
+becomes:
+
+```yaml
+# modules/moderation/config.yml
+enabled: true
+logChannelId: "123"
+```
+
+## Runtime state
+Database-backed state keeps using the shared database facade. The local fallback is stored under `data/`, which is ignored by git.
+
+## Custom modules
+Custom YAML modules live under `custom-modules/<name>/module.yml`.
+Custom JavaScript modules can use `custom-modules/<name>/module.js` or `index.js` plus a local `config.yml`.
