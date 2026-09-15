@@ -1,0 +1,6 @@
+enabled: false
+managerRoles: []
+allowedChannels: []
+maxDescriptionLength: 4000
+allowImages: true
+allowThumbnails: true
