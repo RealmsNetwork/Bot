@@ -1,0 +1,12 @@
+enabled: false
+name: ""
+iconUrl: ""
+description: ""
+memberCount: true
+channelCount: true
+roleCount: true
+features: true
+boosts: true
+owner: true
+invites: false
+commandChannelId: ""
