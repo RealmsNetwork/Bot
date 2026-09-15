@@ -1,0 +1,8 @@
+enabled: true
+help:
+  enabled: true
+diagnostics:
+  enabled: true
+reload:
+  enabled: true
+allowedRoles: []
