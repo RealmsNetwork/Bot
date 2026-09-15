@@ -25,8 +25,8 @@ jobs:
             node --check "$file"
           done
       - name: Load all YAML
-        run: node -e "const fs=require('fs'),yaml=require('js-yaml'); const walk=d=>fs.readdirSync(d,{withFileTypes:true}).flatMap(x=>x.isDirectory()?walk(require('path').join(d,x.name)):[require('path').join(d,x.name)]); for(const f of walk('.').filter(x=>x.endsWith('.yml')||x.endsWith('.yaml'))){yaml.load(fs.readFileSync(f,'utf8')); console.log('YAML ok',f)}"
+        run: node -e "const fs=require('fs'),path=require('path'),yaml=require('js-yaml'); const walk=d=>fs.readdirSync(d,{withFileTypes:true}).flatMap(x=>x.isDirectory()&&!['node_modules','.git'].includes(x.name)?walk(path.join(d,x.name)):(x.isFile()&&/\.ya?ml$/i.test(x.name)?[path.join(d,x.name)]:[])); for(const f of walk('.')){yaml.load(fs.readFileSync(f,'utf8')); console.log('YAML ok',f)}"
       - name: Validate V3 config
-        run: node -e "const fs=require('fs'),yaml=require('js-yaml'); const x=yaml.load(fs.readFileSync('config.example.yml','utf8')); if(!x || x.version!==3 || x.commands.autoRefresh!==true) process.exit(1); console.log('config v3 ok')"
-      - name: Validate custom module example
-        run: node -e "const fs=require('fs'),yaml=require('js-yaml'); const x=yaml.load(fs.readFileSync('custom-modules/example/module.yml','utf8')); if(!x || !x.commands?.length) process.exit(1); console.log('custom module DSL ok')"
+        run: node -e "const fs=require('fs'),yaml=require('js-yaml'); const x=yaml.load(fs.readFileSync('config.example.yml','utf8')); if(!x || x.version!==3 || x.commands.autoRefresh!==true || x.commands.autoDeploy!==true || !x.ai?.fallbackProviders) process.exit(1); console.log('config v3 ok')"
+      - name: Validate custom YAML module
+        run: node -e "const fs=require('fs'),yaml=require('js-yaml'); const x=yaml.load(fs.readFileSync('custom-modules/example/module.yml','utf8')); if(!x || !Array.isArray(x.commands) || !x.commands.length) process.exit(1); console.log('custom module ok')"
