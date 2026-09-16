@@ -1,6 +1,6 @@
 {
   "name": "realms-bot",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "RealmsNetwork production-grade modular Discord bot framework",
   "main": "index.js",
   "scripts": {
@@ -13,7 +13,7 @@
     "syntax": "node tools/qc.js --syntax",
     "health": "node tools/qc.js --health"
   },
-  "keywords": ["discord", "bot", "realmsnetwork", "modular", "sharding", "automation", "moderation", "ai", "sqlite", "mysql", "postgres", "mongodb", "redis", "admin-panel"],
+  "keywords": ["discord", "bot", "modular", "sharding", "automation", "moderation", "ai", "sqlite", "mysql", "postgres", "mongodb", "redis", "admin-panel"],
   "author": "THEMPGUY",
   "license": "MIT",
   "repository": { "type": "git", "url": "https://github.com/RealmsNetwork/Bot" },
