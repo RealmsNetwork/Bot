@@ -1,5 +1,5 @@
 # RealmsNetwork Bot v0.2 advanced-capable configuration
-# Keep secrets in .env. Basic module behavior lives in modules/<name>/config.yml.
+# Keep secrets in .env. Module enable state lives in the root config.yml; module config.yml files contain module settings.
 version: 4
 release: "0.2.0"
 
@@ -104,7 +104,7 @@ adminPanel:
   allowModuleToggle: true
   allowConfigWrite: false
 
-# These are created automatically for every module and should not be removed.
+# Advanced files are created automatically for modules.
 advancedFiles: true
 
 ai:
