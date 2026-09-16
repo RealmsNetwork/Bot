@@ -1,6 +1,6 @@
 {
   "name": "realms-bot",
-  "version": "0.2.0",
+  "version": "0.1.0",
   "description": "RealmsNetwork production-grade modular Discord bot framework",
   "main": "index.js",
   "scripts": {
