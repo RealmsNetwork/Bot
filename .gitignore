@@ -4,6 +4,9 @@ node_modules/
 .pnpm-store/
 .yarn/
 
+# Local GitHub tooling/runtime
+.github/
+
 # Secrets
 .env
 .env.*
