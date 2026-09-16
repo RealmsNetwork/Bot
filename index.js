@@ -19,20 +19,15 @@ function installMissing(entries){if(!entries.length)return true;rule();install(`
 let requiredMissing=[];for(const[name,entry]of packages){if(resolveInstalled(name))ok(`${entry.spec} already installed`);else requiredMissing.push(entry);}if(!installMissing(requiredMissing))process.exit(1);
 require('dotenv').config({quiet:true});
 let yaml;try{yaml=require('js-yaml');}catch(e){error(`Required dependency js-yaml is unavailable: ${e.message}`);process.exit(1);}
-const exampleConfig=path.join(root,'config.example.yml'),configFile=path.join(root,'config.yml');
-if(!fs.existsSync(configFile)&&fs.existsSync(exampleConfig)){fs.copyFileSync(exampleConfig,configFile);ok('Created config.yml from config.example.yml');}
-let config={};
-try{config=yaml.load(fs.readFileSync(configFile,'utf8'))||{};}catch(e){error(`Could not read config.yml: ${e.message}`);process.exit(1);}
+let config;try{config=require('./lib/config').loadConfig();}catch(e){error(`Could not load config.yml: ${e.message}`);process.exit(1);}
 function moduleDirs(base){if(!fs.existsSync(base))return[];return fs.readdirSync(base,{withFileTypes:true}).filter(x=>x.isDirectory()).map(x=>path.join(base,x.name));}
 function readYaml(file){try{return yaml.load(fs.readFileSync(file,'utf8'))||{};}catch(e){warn(`Invalid YAML ${path.relative(root,file)}: ${e.message}`);return{};}}
-function moduleConfig(dir){const configFile=path.join(dir,'config.yml');const moduleFile=path.join(dir,'module.yml');if(fs.existsSync(configFile))return readYaml(configFile);if(fs.existsSync(moduleFile))return readYaml(moduleFile);return{};}
-function enabled(manifest){return manifest.enabled===true||manifest.module?.enabled===true;}
 let enabledModules=0;
-for(const dir of [...moduleDirs(path.join(root,'modules')),...moduleDirs(path.join(root,'custom-modules'))]){const manifest=moduleConfig(dir);if(!enabled(manifest))continue;enabledModules++;addDependencies(manifest.dependencies,'module');if(manifest.advanced===true&&fs.existsSync(path.join(dir,'advanced.yml'))){const advanced=readYaml(path.join(dir,'advanced.yml'));addDependencies(advanced.module?.dependencies,'advanced');addDependencies(advanced.dependencies,'advanced');}}
+for(const dir of [...moduleDirs(path.join(root,'modules')),...moduleDirs(path.join(root,'custom-modules'))]){const name=path.basename(dir);const manifestFile=fs.existsSync(path.join(dir,'config.yml'))?path.join(dir,'config.yml'):path.join(dir,'module.yml');const manifest=fs.existsSync(manifestFile)?readYaml(manifestFile):{};const rootEnabled=config[name]?.enabled===true||(name==='dashboard'&&config.adminPanel?.enabled===true);if(!rootEnabled)continue;enabledModules++;addDependencies(manifest.dependencies,'module');if(manifest.advanced===true&&fs.existsSync(path.join(dir,'advanced.yml'))){const advanced=readYaml(path.join(dir,'advanced.yml'));addDependencies(advanced.module?.dependencies,'advanced');addDependencies(advanced.dependencies,'advanced');}}
 if(config.database?.enabled===true){const provider=String(config.database.primary||'none').toLowerCase();if(provider==='sqlite')addPackage('better-sqlite3@13.0.3','database');if(provider==='mysql')addPackage('mysql2@3.24.4','database');if(provider==='postgres')addPackage('pg@8.23.0','database');if(provider==='mongodb')addPackage('mongodb@7.6.0','database');if(provider==='redis')addPackage('redis@6.2.1','database');}
 const shardSetting=config.sharding?.enabled===true?(config.sharding?.totalShards==='auto'?'auto':String(config.sharding?.totalShards||1)):'off';
 banner({version,node:process.version,platform:`${process.platform}/${process.arch}`,modules:`${enabledModules} enabled`,database:String(config.database?.enabled===true?config.database?.primary||'enabled':'disabled'),shards:shardSetting});
-boot(`Working directory: ${root}`);boot(`Process: ${process.pid} | ${process.execPath}`);boot(`Configuration: ${path.basename(configFile)} | release ${config.release||'unknown'}`);
+boot(`Working directory: ${root}`);boot(`Process: ${process.pid} | ${process.execPath}`);boot(`Configuration: ${path.basename(path.join(root,'config.yml'))} | release ${config.release||'unknown'}`);
 const missing=[];let already=0;for(const[name,entry]of packages){if(resolveInstalled(name)){already++;if(entry.source!=='required')ok(`${entry.spec} already installed`);}else missing.push(entry);}if(!installMissing(missing))process.exit(1);info(`Dependencies: ${already} already present | ${missing.length} installed | ${packages.size} total`);
 if(!process.env.DISCORD_TOKEN||process.env.DISCORD_TOKEN==='YOUR_BOT_TOKEN_HERE'){error('Set DISCORD_TOKEN in .env');process.exit(1);}ok('Dependency bootstrap complete');rule();
 const {ShardingManager}=require('discord.js');
