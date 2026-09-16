@@ -1,9 +1,12 @@
 enabled: false
-advanced: false
-port: 8787
+advanced: true
 host: 127.0.0.1
+port: 8787
 tokenEnv: DASHBOARD_TOKEN
 public: false
 readOnly: true
 allowReload: true
 allowModuleToggle: true
+allowConfigWrite: false
+sessionHours: 8
+maxBodyBytes: 1048576

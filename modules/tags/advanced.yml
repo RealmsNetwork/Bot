@@ -1,0 +1,251 @@
+# RealmsNetwork Bot advanced module configuration
+# Safe power-user settings. Existing module behavior remains in config.yml.
+schemaVersion: 2
+module:
+  enabled: true
+  mode: production
+  environmentOverrides: {}
+  failFast: false
+  reloadable: true
+  hotReloadListeners: false
+  dependencies: []
+  optionalDependencies: []
+  featureFlags: {}
+lifecycle:
+  initialize: true
+  ready: true
+  destroy: true
+  reload: true
+  restartOnFailure: false
+  restartLimit: 3
+  restartWindowSeconds: 300
+  startupTimeoutMs: 30000
+  shutdownTimeoutMs: 15000
+commands:
+  enabled: true
+  registerSlash: true
+  registerContextMenus: true
+  registerPrefix: true
+  defaultCooldownSeconds: 0
+  defaultPermissionGroup: everyone
+  defaultPermissionKey: null
+  defaultEphemeral: false
+  deferReplies: false
+  nsfw: false
+  dmPermission: true
+  deletePrefixTrigger: false
+  aliases: {}
+  disabled: []
+  overrides: {}
+prefix:
+  enabled: false
+  prefixes: []
+  aliases: {}
+  mentionPrefix: true
+  caseSensitive: false
+  stripWhitespace: true
+  allowDM: false
+  allowBots: false
+  requireGuild: true
+  errorMessage: inherit
+permissions:
+  mode: merge
+  defaultGroup: everyone
+  allowUsers: []
+  denyUsers: []
+  allowRoles: []
+  denyRoles: []
+  allowChannels: []
+  denyChannels: []
+  ownerBypass: inherit
+  requireAdministrator: false
+  commandPermissions: {}
+  roleGroups:
+    owner: []
+    manager: []
+    admin: []
+    moderator: []
+    helper: []
+ui:
+  enabled: true
+  style: branded
+  ephemeral: false
+  compact: false
+  embeds: true
+  buttons: true
+  selects: true
+  modals: true
+  timestamps: true
+  color: inherit
+  accentColor: inherit
+  title: inherit
+  footer: inherit
+  footerIcon: inherit
+  thumbnail: null
+  image: null
+  author: inherit
+  showBranding: true
+  showModuleName: false
+  errorStyle: branded
+  successStyle: branded
+  pagination:
+    enabled: true
+    pageSize: 10
+    timeoutSeconds: 120
+responses:
+  success: inherit
+  error: inherit
+  permissionDenied: inherit
+  cooldown: inherit
+  notFound: inherit
+  noResults: inherit
+  loading: inherit
+  confirmation: inherit
+  deleteAfterSeconds: 0
+  mentionUser: true
+embeds:
+  defaults:
+    color: inherit
+    footer: inherit
+    timestamp: true
+  templates: {}
+components:
+  customIds: {}
+  buttons: {}
+  selects: {}
+  modals: {}
+  collectors:
+    timeoutSeconds: 120
+    idleSeconds: 0
+    maxUsers: 0
+listeners:
+  enabled: true
+  ignoreBots: true
+  ignoreWebhooks: true
+  ignoredChannels: []
+  ignoredRoles: []
+  allowedChannels: []
+  allowedRoles: []
+  guildOnly: true
+  eventOverrides: {}
+rateLimits:
+  enabled: true
+  globalPerUser: 0
+  globalPerGuild: 0
+  globalPerChannel: 0
+  commandPerUser: {}
+  eventPerUser: {}
+  burst: 1
+  windowSeconds: 60
+cooldowns:
+  persistent: false
+  scope: user
+  defaultSeconds: 0
+  commands: {}
+  events: {}
+scheduler:
+  enabled: true
+  timezone: UTC
+  maxConcurrentJobs: 2
+  catchUp: false
+  jobs: {}
+storage:
+  namespace: inherit
+  persistent: true
+  cache: true
+  cacheTtlSeconds: 300
+  cacheMaxEntries: 1000
+  compress: false
+  encrypt: false
+  indexes: []
+cache:
+  enabled: true
+  ttlSeconds: 300
+  maxEntries: 1000
+  staleWhileRevalidate: false
+http:
+  enabled: true
+  timeoutMs: 15000
+  maxResponseBytes: 5242880
+  retries: 2
+  retryDelayMs: 500
+  allowedHosts: []
+  headers: {}
+  userAgent: RealmsNetwork-Bot/0.2
+webhooks:
+  enabled: false
+  urls: {}
+  defaultHeaders: {}
+  timeoutMs: 10000
+  retries: 2
+logging:
+  enabled: true
+  level: info
+  audit: false
+  commandExecutions: true
+  eventExecutions: false
+  errors: true
+  metrics: true
+  channelId: ""
+  webhookUrl: ""
+  includeUser: true
+  includeGuild: true
+  includeArguments: false
+analytics:
+  enabled: true
+  commandUsage: true
+  errors: true
+  latency: true
+  retentionDays: 30
+health:
+  enabled: true
+  readiness: true
+  liveness: true
+  dependencyChecks: true
+  intervalSeconds: 30
+performance:
+  maxConcurrent: 0
+  maxActionsPerEvent: 1000
+  maxLoopIterations: 1000
+  maxWaitMs: 120000
+  timeoutMs: 30000
+  queueWhenBusy: true
+  queueLimit: 100
+security:
+  allowInlineJS: false
+  allowHTTP: true
+  allowWebhooks: false
+  allowEval: false
+  allowFileSystem: false
+  allowChildProcess: false
+  allowedDomains: []
+  redactSecrets: true
+localization:
+  enabled: true
+  defaultLocale: en-US
+  fallbackLocale: en-US
+  locales: {}
+branding:
+  enabled: true
+  inheritRoot: true
+  serverName: inherit
+  botName: inherit
+  prefix: inherit
+  color: inherit
+  footer: inherit
+  supportUrl: inherit
+  iconUrl: inherit
+  logoUrl: inherit
+sharding:
+  compatible: true
+  shardLocalOnly: false
+  aggregateMetrics: true
+  leaderOnlyJobs: false
+hooks:
+  beforeCommand: []
+  afterCommand: []
+  onError: []
+  onLoad: []
+  onUnload: []
+  onReady: []
+overrides: {}

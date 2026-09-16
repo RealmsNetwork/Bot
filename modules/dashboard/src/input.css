@@ -1,0 +1,21 @@
+@import "tailwindcss";
+@source "../web";
+@theme {
+  --color-realms-300: #c4b5fd;
+  --color-realms-400: #a78bfa;
+  --color-realms-500: #8b5cf6;
+  --color-realms-600: #7c3aed;
+  --color-realms-700: #6d28d9;
+}
+
+:root{color-scheme:dark}
+body{background:radial-gradient(circle at 10% -10%,rgba(139,92,246,.13),transparent 30rem),radial-gradient(circle at 95% 5%,rgba(217,70,239,.1),transparent 28rem),#09090b}
+*{scrollbar-width:thin;scrollbar-color:#3f3f46 transparent}
+::selection{background:#7c3aed;color:#fff}
+.panel-card{@apply rounded-2xl border border-white/8 bg-zinc-900/65 shadow-2xl shadow-black/20 backdrop-blur-xl}
+.panel-button{@apply inline-flex items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm font-medium text-zinc-100 transition hover:bg-white/10 active:scale-[.98] disabled:cursor-not-allowed disabled:opacity-40}
+.panel-input{@apply w-full rounded-xl border border-white/10 bg-zinc-950/80 px-3 py-2.5 text-sm text-zinc-100 outline-none transition placeholder:text-zinc-600 focus:border-realms-500/70 focus:ring-2 focus:ring-realms-500/15}
+.nav-item{@apply flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-zinc-400 transition hover:bg-white/5 hover:text-zinc-100}
+.nav-item.active{@apply bg-realms-500/15 text-realms-300 ring-1 ring-realms-500/20}
+.stat-value{@apply mt-2 text-2xl font-semibold tracking-tight text-white}
+.code-area{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace;tab-size:2}
