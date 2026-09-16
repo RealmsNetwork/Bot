@@ -7,7 +7,7 @@
     "start": "node index.js",
     "dev": "nodemon index.js",
     "deploy": "node deploy-commands.js",
-    "build:panel": "@tailwindcss/cli -i modules/dashboard/src/input.css -o modules/dashboard/public/admin.css --minify",
+    "build:panel": "tailwindcss -i modules/dashboard/src/input.css -o modules/dashboard/public/admin.css --minify",
     "advanced:sync": "node tools/sync-advanced.js",
     "check": "node tools/qc.js",
     "syntax": "node tools/qc.js --syntax",
