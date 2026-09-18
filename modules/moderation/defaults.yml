@@ -1,6 +1,5 @@
 enabled: false
 advanced: false
-
 behavior:
   deleteCommandMessages: false
   dmUsers: true
@@ -14,36 +13,29 @@ behavior:
   refuseNotBannedUnban: true
   refuseDuplicateWarnings: true
   maxReasonLength: 1000
-
 cases:
   enabled: true
   persist: true
   includeModerator: true
   includeReason: true
-
 limits:
   massBanMax: 200
   massKickMax: 100
   historyMax: 25
-
 warnings:
   maxWarnings: 10
   preventDuplicate: false
   actions: []
-
 purge:
   maxMessages: 1000
-  requireManageMessages: true
   allowBots: true
   allowUsers: true
-
+  requireManageMessages: true
 slowmode:
   maxSeconds: 21600
-
 logging:
   enabled: true
   channelId: ""
-
 permissions:
   kick: ModerateMembers
   ban: BanMembers

@@ -37,11 +37,16 @@ const commands = [{
     const c = config(i.client);
     if (i.options.getSubcommand() === 'create') return openTicket(i);
     if (!i.guild || !i.channel?.name?.startsWith('ticket-')) return i.reply({ content: 'This is not a ticket channel.', ephemeral: true });
+    const support = Array.isArray(c.supportRoleIds) ? c.supportRoleIds.map(String) : [];
+    const isSupport = i.member?.roles?.cache?.some(role => support.includes(role.id)) || i.member?.permissions?.has(PermissionFlagsBits.ManageChannels);
     if (i.options.getSubcommand() === 'claim') {
       if (!c.claiming) return i.reply({ content: 'Ticket claiming is disabled.', ephemeral: true });
+      if (!isSupport) return i.reply({ content: 'Only configured ticket support staff can claim tickets.', ephemeral: true });
+      if (!i.guild.members.me.permissions.has(PermissionFlagsBits.ManageChannels)) return i.reply({ content: 'I need Manage Channels.', ephemeral: true });
       await i.channel.permissionOverwrites.edit(i.user.id, { ViewChannel: true, SendMessages: true, ReadMessageHistory: true });
       return i.reply(`🛡️ ${i.user} claimed this ticket.`);
     }
+    if (!isSupport) return i.reply({ content: 'Only ticket support staff can close tickets.', ephemeral: true });
     if (!i.guild.members.me.permissions.has(PermissionFlagsBits.ManageChannels)) return i.reply({ content: 'I need Manage Channels.', ephemeral: true });
     await i.reply(c.closeConfirm ? { content: '🔒 Closing ticket...' } : { content: '🔒 Closing ticket...' });
     setTimeout(() => i.channel.delete().catch(() => {}), 1500);

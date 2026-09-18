@@ -1,4 +1,5 @@
 const { SlashCommandBuilder, PermissionFlagsBits } = require('discord.js');
+const { targetGuard, isBanned, validSnowflake } = require('../../lib/guards');
 
 const commands = [];
 const command = (data, permission, execute, group = 'moderator') => ({ data, permission, requiredPermission: permission, permissionGroup: group, execute });
@@ -6,9 +7,8 @@ const addUser = builder => builder.addUserOption(o => o.setName('user').setDescr
 const addReason = builder => builder.addStringOption(o => o.setName('reason').setDescription('Reason').setMaxLength(1000));
 const fetchMember = (guild, id) => guild.members.fetch(id).catch(() => null);
 
-function canAct(client, member) {
-  const me = member?.guild?.members?.me;
-  return !!member && !!me && member.id !== member.guild.ownerId && member.id !== client.user?.id && me.roles.highest.comparePositionTo(member.roles.highest) > 0;
+function canAct(client, member, action = 'moderate') {
+  return !targetGuard(client, member, { action });
 }
 function textReason(i, fallback) { return i.options.getString('reason') || fallback; }
 function idsFrom(value) { return [...new Set(String(value).split(/[\s,]+/).filter(x => /^\d{17,20}$/.test(x)))]; }
@@ -23,7 +23,7 @@ function userModeration(name, description, permission, handler) {
 userModeration('kick', 'Kick a member', PermissionFlagsBits.KickMembers, async i => {
   const u = i.options.getUser('user', true);
   const m = await fetchMember(i.guild, u.id);
-  if (!canAct(i.client, m)) return i.reply({ content: 'I cannot act on that member.', ephemeral: true });
+  if (!canAct(i.client, m, 'kick')) return i.reply({ content: 'I cannot act on that member.', ephemeral: true });
   await m.kick(textReason(i, 'Moderation command'));
   await i.reply(`👢 Kicked ${u.tag}`);
 });
@@ -31,15 +31,18 @@ userModeration('kick', 'Kick a member', PermissionFlagsBits.KickMembers, async i
 userModeration('ban', 'Ban a member', PermissionFlagsBits.BanMembers, async i => {
   const u = i.options.getUser('user', true);
   const m = await fetchMember(i.guild, u.id);
-  if (m && !canAct(i.client, m)) return i.reply({ content: 'I cannot act on that member.', ephemeral: true });
-  await i.guild.members.ban(u.id, { reason: textReason(i, 'Moderation command'), deleteMessageSeconds: Number(i.client.config.moderation?.deleteMessageSeconds || 86400) });
+  if (m && !canAct(i.client, m, 'ban')) return i.reply({ content: 'I cannot act on that member.', ephemeral: true });
+  if (await isBanned(i.guild, u.id)) return i.reply({ content: 'That user is already banned.', ephemeral: true });
+  if (i.client.config.moderation?.behavior?.requireReasonForBan && !i.options.getString('reason')) return i.reply({ content: 'A reason is required for bans.', ephemeral: true });
+  await i.guild.members.ban(u.id, { reason: textReason(i, 'Moderation command'), deleteMessageSeconds: Number(i.client.config.moderation?.behavior?.defaultBanDeleteSeconds ?? 0) });
   await i.reply(`🔨 Banned ${u.tag}`);
 });
 
 userModeration('softban', 'Ban and immediately unban a member', PermissionFlagsBits.BanMembers, async i => {
   const u = i.options.getUser('user', true);
   const m = await fetchMember(i.guild, u.id);
-  if (m && !canAct(i.client, m)) return i.reply({ content: 'I cannot act on that member.', ephemeral: true });
+  if (m && !canAct(i.client, m, 'softban')) return i.reply({ content: 'I cannot act on that member.', ephemeral: true });
+  if (await isBanned(i.guild, u.id)) return i.reply({ content: 'That user is already banned.', ephemeral: true });
   const reason = textReason(i, 'Softban');
   await i.guild.members.ban(u.id, { reason, deleteMessageSeconds: 86400 });
   await i.guild.members.unban(u.id, reason).catch(() => {});
@@ -61,7 +64,8 @@ commands.push(command(massban, PermissionFlagsBits.BanMembers, async i => {
     await Promise.all(ids.slice(n, n + 5).map(async id => {
       try {
         const m = await fetchMember(i.guild, id);
-        if (m && !canAct(i.client, m)) { fail++; return; }
+        if (m && !canAct(i.client, m, 'ban')) { fail++; return; }
+        if (await isBanned(i.guild, id)) { fail++; return; }
         await i.guild.members.ban(id, { reason: why, deleteMessageSeconds: Number(i.client.config.moderation?.deleteMessageSeconds || 86400) });
         ok++;
       } catch { fail++; }
@@ -84,7 +88,7 @@ commands.push(command(masskick, PermissionFlagsBits.KickMembers, async i => {
   for (const id of ids) {
     try {
       const m = await fetchMember(i.guild, id);
-      if (!canAct(i.client, m)) { fail++; continue; }
+      if (!canAct(i.client, m, 'kick')) { fail++; continue; }
       await m.kick(why);
       ok++;
     } catch { fail++; }
@@ -97,8 +101,31 @@ unban.addStringOption(o => o.setName('id').setDescription('Discord user ID').set
 addReason(unban);
 commands.push(command(unban, PermissionFlagsBits.BanMembers, async i => {
   const id = i.options.getString('id', true);
+  if (!validSnowflake(id)) return i.reply({ content: 'That is not a valid Discord user ID.', ephemeral: true });
+  if (!(await isBanned(i.guild, id))) return i.reply({ content: 'That user is not currently banned.', ephemeral: true });
   await i.guild.members.unban(id, textReason(i, 'Moderation command'));
+  const tempbans = await i.client.db.get(i.guildId, 'tempbans', []);
+  await i.client.db.set(i.guildId, 'tempbans', Array.isArray(tempbans) ? tempbans.filter(x => x?.user !== id) : []);
   await i.reply(`✅ Unbanned ${id}`);
+}));
+
+const tempban = new SlashCommandBuilder().setName('tempban').setDescription('Temporarily ban a member');
+addUser(tempban);
+tempban.addIntegerOption(o => o.setName('minutes').setDescription('1-40320').setMinValue(1).setMaxValue(40320).setRequired(true));
+addReason(tempban);
+commands.push(command(tempban, PermissionFlagsBits.BanMembers, async i => {
+  const u = i.options.getUser('user', true);
+  const m = await fetchMember(i.guild, u.id);
+  if (m && !canAct(i.client, m, 'ban')) return i.reply({ content: 'I cannot act on that member.', ephemeral: true });
+  if (await isBanned(i.guild, u.id)) return i.reply({ content: 'That user is already banned.', ephemeral: true });
+  const minutes = i.options.getInteger('minutes', true);
+  const reason = textReason(i, 'Temporary ban');
+  await i.guild.members.ban(u.id, { reason, deleteMessageSeconds: Number(i.client.config.moderation?.behavior?.defaultBanDeleteSeconds || 0) });
+  const expiresAt = Date.now() + minutes * 60000;
+  const list = await i.client.db.get(i.guildId, 'tempbans', []);
+  list.push({ user: u.id, moderator: i.user.id, reason, expiresAt });
+  await i.client.db.set(i.guildId, 'tempbans', list);
+  await i.reply(`⏱️ Temporarily banned ${u.tag} for **${minutes} minute(s)**.`);
 }));
 
 const baninfo = new SlashCommandBuilder().setName('baninfo').setDescription('Check whether a user is banned')
@@ -115,14 +142,14 @@ timeout.addIntegerOption(o => o.setName('minutes').setDescription('1-40320').set
 addReason(timeout);
 commands.push(command(timeout, PermissionFlagsBits.ModerateMembers, async i => {
   const u = i.options.getUser('user', true), m = await fetchMember(i.guild, u.id);
-  if (!canAct(i.client, m)) return i.reply({ content: 'I cannot act on that member.', ephemeral: true });
+  if (!canAct(i.client, m, 'timeout')) return i.reply({ content: 'I cannot act on that member.', ephemeral: true });
   await m.timeout(i.options.getInteger('minutes', true) * 60000, textReason(i, 'Moderation command'));
   await i.reply(`⏳ Timed out ${u.tag}`);
 }));
 
 userModeration('untimeout', 'Remove a timeout', PermissionFlagsBits.ModerateMembers, async i => {
   const u = i.options.getUser('user', true), m = await fetchMember(i.guild, u.id);
-  if (!canAct(i.client, m)) return i.reply({ content: 'I cannot act on that member.', ephemeral: true });
+  if (!canAct(i.client, m, 'timeout')) return i.reply({ content: 'I cannot act on that member.', ephemeral: true });
   await m.timeout(null, textReason(i, 'Moderation command'));
   await i.reply(`✅ Removed timeout from ${u.tag}`);
 });
@@ -131,6 +158,8 @@ userModeration('warn', 'Warn a member', PermissionFlagsBits.ModerateMembers, asy
   const u = i.options.getUser('user', true), r = textReason(i, 'No reason provided');
   const key = `warnings:${u.id}`;
   const list = await i.client.db.get(i.guildId, key, []);
+  const maxWarnings = Math.max(1, Number(i.client.config.moderation?.warnings?.maxWarnings || 10));
+  if (list.length >= maxWarnings) return i.reply({ content: `This member has reached the warning limit of ${maxWarnings}.`, ephemeral: true });
   list.push({ id: Date.now().toString(36), reason: r, moderator: i.user.id, at: Date.now() });
   await i.client.db.set(i.guildId, key, list);
   await i.reply(`⚠️ Warned ${u.tag}. They now have **${list.length}** warning(s).`);
@@ -164,14 +193,20 @@ commands.push(command(unwarn, PermissionFlagsBits.ModerateMembers, async i => {
 const purge = new SlashCommandBuilder().setName('purge').setDescription('Delete recent messages')
 purge.addIntegerOption(o => o.setName('amount').setDescription('1-100').setMinValue(1).setMaxValue(100).setRequired(true));
 commands.push(command(purge, PermissionFlagsBits.ManageMessages, async i => {
-  const msgs = await i.channel.bulkDelete(i.options.getInteger('amount', true), true);
+  const requested = i.options.getInteger('amount', true);
+  const maxMessages = Math.max(1, Number(i.client.config.moderation?.purge?.maxMessages || 100));
+  if (requested > maxMessages) return i.reply({ content: `Purge limit: ${maxMessages}.`, ephemeral: true });
+  if (!i.channel?.bulkDelete) return i.reply({ content: 'This channel does not support bulk deletion.', ephemeral: true });
+  const msgs = await i.channel.bulkDelete(requested, true);
   await i.reply({ content: `🧹 Deleted ${msgs.size} messages.`, ephemeral: true });
 }));
 
 const purgebots = new SlashCommandBuilder().setName('purgebots').setDescription('Delete recent bot messages')
 purgebots.addIntegerOption(o => o.setName('amount').setDescription('1-100').setMinValue(1).setMaxValue(100).setRequired(true));
 commands.push(command(purgebots, PermissionFlagsBits.ManageMessages, async i => {
-  const n = i.options.getInteger('amount', true), msgs = await i.channel.messages.fetch({ limit: 100 });
+  const n = i.options.getInteger('amount', true), maxMessages = Math.max(1, Number(i.client.config.moderation?.purge?.maxMessages || 100));
+  if (n > maxMessages) return i.reply({ content: `Purge limit: ${maxMessages}.`, ephemeral: true });
+  const msgs = await i.channel.messages.fetch({ limit: Math.min(100, maxMessages) });
   const bots = msgs.filter(m => m.author?.bot).first(n);
   for (const m of bots) await m.delete().catch(() => {});
   await i.reply({ content: `🤖 Deleted ${bots.length} bot messages.`, ephemeral: true });
@@ -243,4 +278,25 @@ commands.push(command(history, PermissionFlagsBits.ModerateMembers, async i => {
   await i.reply({ content: rows.length ? rows.join('\n') : `No cases found for ${u.tag}.`, ephemeral: true });
 }));
 
-module.exports = { commands };
+async function initialize(client) {
+  const sweep = async () => {
+    for (const guild of client.guilds.cache.values()) {
+      const list = await client.db.get(guild.id, 'tempbans', []);
+      if (!Array.isArray(list) || !list.length) continue;
+      const keep = [];
+      for (const entry of list) {
+        if (!entry?.user || Number(entry.expiresAt) > Date.now()) { if (entry?.user) keep.push(entry); continue; }
+        if (await isBanned(guild, entry.user)) await guild.members.unban(entry.user, 'Temporary ban expired').catch(() => {});
+      }
+      if (keep.length !== list.length) await client.db.set(guild.id, 'tempbans', keep);
+    }
+  };
+  await sweep();
+  const timer = setInterval(() => void sweep().catch(error => console.error('[Moderation] Tempban sweep failed:', error?.message || error)), 30000);
+  timer.unref?.();
+  client.moderationTempbanTimer = timer;
+}
+async function destroy(client) {
+  if (client.moderationTempbanTimer) clearInterval(client.moderationTempbanTimer);
+}
+module.exports = { initialize, destroy, commands };

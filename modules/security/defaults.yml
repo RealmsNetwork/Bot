@@ -1,0 +1,18 @@
+enabled: false
+advanced: false
+strictChecks: true
+ignoreBots: true
+ignoreStaff: true
+staffRoleId: ""
+channelId: ""
+patterns: []
+patternReason: "Security pattern matched"
+reason: "Triggered security trap"
+action: ban
+timeoutDurationMs: 86400000
+deleteMessageSeconds: 0
+deleteTriggerMessage: true
+requireReason: false
+logChannelId: ""
+logTitle: "Security Triggered"
+color: "#8b5cf6"

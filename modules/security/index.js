@@ -1,8 +1,10 @@
 const { EmbedBuilder, PermissionFlagsBits, SlashCommandBuilder } = require('discord.js');
+const { targetGuard, isBanned } = require('../../lib/guards');
 
 function allowed(member, cfg) {
   if (!member) return false;
   if (member.id === member.guild.ownerId) return false;
+  if (member.id === member.client?.user?.id) return false;
   if (cfg.ignoreBots !== false && member.user?.bot) return false;
   if (cfg.ignoreStaff !== false && cfg.staffRoleId && member.roles.cache.has(String(cfg.staffRoleId))) return false;
   return true;
@@ -10,9 +12,12 @@ function allowed(member, cfg) {
 
 async function punish(member, action, reason, cfg) {
   if (!member) return false;
+  const guard = targetGuard(member.client, member, { action });
+  if (guard) { console.warn(`[Security] Refusing ${action} for ${member.user?.tag || member.id}: ${guard}`); return false; }
   try {
     if (action === 'ban') {
-      await member.ban({ reason });
+      if (await isBanned(member.guild, member.id)) return false;
+      await member.ban({ reason, deleteMessageSeconds: Math.max(0, Math.min(604800, Number(cfg.deleteMessageSeconds || 0))) });
       return true;
     }
     if (action === 'kick') {
@@ -48,6 +53,7 @@ async function logTrigger(client, config, message, action, reason, cfg) {
 async function initialize(client, config, moduleConfig) {
   const cfg = moduleConfig || {};
   const channelId = cfg.channelId ? String(cfg.channelId) : '';
+  if (cfg.enabled === false) return;
   const patterns = Array.isArray(cfg.patterns) ? cfg.patterns.filter(Boolean) : [];
 
   if (!channelId && !patterns.length) {
@@ -63,6 +69,8 @@ async function initialize(client, config, moduleConfig) {
     if (!allowed(member, cfg)) return;
 
     const action = String(cfg.action || 'ban').toLowerCase();
+    if (cfg.requireReason === true && !String(reason || '').trim()) return;
+    if (action === 'ban' && await isBanned(message.guild, member.id)) return;
     if (!['ban', 'kick', 'timeout'].includes(action)) {
       console.error(`[Security] Invalid action "${action}". Expected ban, kick, or timeout.`);
       return;

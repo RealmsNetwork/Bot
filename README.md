@@ -21,7 +21,7 @@ advanced: false
 
 When `advanced: true`, the loader creates that module's `advanced.yml` on first load. The generated file is intentionally comprehensive: lifecycle, command registration and overrides, prefix integration, permissions, UI/components, responses, embeds, event filters, rate limits, cooldowns, schedulers, storage/cache, HTTP, webhooks, logging, analytics, health, performance limits, security controls, localization, branding, sharding behavior and lifecycle hooks.
 
-Existing `advanced.yml` files are never overwritten. Simple users can stay in `config.yml`; advanced hosts get a full per-module control surface.
+Existing `advanced.yml` files are never overwritten. Modules can also ship `defaults.yml`; missing settings are merged into `config.yml` automatically without overwriting existing values. Simple users can stay in `config.yml`; advanced hosts get a full per-module control surface.
 
 ## Commands, prefixes and branding
 
@@ -78,6 +78,10 @@ JavaScript modules are first-class and can use the full discord.js API plus shar
 
 The AI router supports Ollama, LM Studio, OpenAI-compatible endpoints, OpenAI, Groq, Mistral, DeepSeek, xAI, Together, OpenRouter, Perplexity, Cohere, Hugging Face, Anthropic and Gemini through HTTP adapters. Optional provider SDKs are not required for the base runtime.
 
+## Security and strict checks
+
+Commands pass through centralized guild, actor, bot-permission, channel-permission, NSFW and cooldown checks before execution. Moderation actions enforce Discord hierarchy and target-state checks, including already-banned/already-unbanned detection. The moderation module includes persistent temporary bans with automatic expiry. Role management enforces both bot and actor hierarchy. Ticket claim/close actions require configured support staff. Automated security and AutoMod punishments re-check target hierarchy and state before acting.
+
 ## Built-in feature areas
 
 Moderation, mass actions, warnings, timeouts, purge and channel controls; automod and security traps; audit logging; welcome/autoroles; tickets; roles; giveaways; leveling; economy; reminders; starboard; community tools; forms; tags; AFK; autoresponders; feeds; highlights; utility/server/developer tools; AI; Countryballs; automation; voice/music/TTS/temp VC; sharding and diagnostics.
@@ -92,8 +96,8 @@ Keep real tokens, API keys and database credentials in `.env` and never commit t
 
 ## Quality control
 
-`npm run check` is the canonical local QC command. CI runs the same QC suite plus core import and package metadata smoke tests on every push and pull request. The QC suite checks JavaScript syntax, YAML validity, V4 defaults, module config structure, stale module example files and SQLite support.
+`npm run check` is the canonical local QC command. CI runs the same QC suite plus core import and package metadata smoke tests on every push and pull request. The QC suite checks JavaScript syntax, YAML validity, V5 defaults, module config structure, stale module example files and SQLite support.
 
 ## Migration
 
-The runtime migrates older root configurations to V4. `commandDeployment` maps to `commands`, `aichat` maps to `ai`, `honeypot` maps to the security module, and legacy module settings are preserved while local module configs are created. See `MIGRATIONS.md`.
+The runtime migrates older root configurations to V5. `commandDeployment` maps to `commands`, `aichat` maps to `ai`, `honeypot` maps to the security module, and legacy module settings are preserved while local module configs are created. See `MIGRATIONS.md`.
