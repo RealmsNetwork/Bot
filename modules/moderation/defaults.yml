@@ -18,6 +18,10 @@ cases:
   persist: true
   includeModerator: true
   includeReason: true
+limits:
+  massBanMax: 200
+  massKickMax: 100
+  historyMax: 25
 warnings:
   maxWarnings: 10
   preventDuplicate: false
