@@ -1,5 +1,5 @@
 const { EmbedBuilder, PermissionFlagsBits } = require('discord.js');
-const { targetGuard, isBanned } = require('../../lib/guards);
+const { targetGuard, isBanned } = require('../../lib/guards');
 
 function list(value) { return Array.isArray(value) ? value.map(String).filter(Boolean) : []; }
 function matchesLink(content) { return /https?:\/\/\S+/i.test(content); }
