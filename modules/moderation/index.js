@@ -104,6 +104,8 @@ commands.push(command(unban, PermissionFlagsBits.BanMembers, async i => {
   if (!validSnowflake(id)) return i.reply({ content: 'That is not a valid Discord user ID.', ephemeral: true });
   if (!(await isBanned(i.guild, id))) return i.reply({ content: 'That user is not currently banned.', ephemeral: true });
   await i.guild.members.unban(id, textReason(i, 'Moderation command'));
+  const tempbans = await i.client.db.get(i.guildId, 'tempbans', []);
+  await i.client.db.set(i.guildId, 'tempbans', Array.isArray(tempbans) ? tempbans.filter(x => x?.user !== id) : []);
   await i.reply(`✅ Unbanned ${id}`);
 }));
 
