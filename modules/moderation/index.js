@@ -34,7 +34,7 @@ userModeration('ban', 'Ban a member', PermissionFlagsBits.BanMembers, async i =>
   if (m && !canAct(i.client, m, 'ban')) return i.reply({ content: 'I cannot act on that member.', ephemeral: true });
   if (await isBanned(i.guild, u.id)) return i.reply({ content: 'That user is already banned.', ephemeral: true });
   if (i.client.config.moderation?.behavior?.requireReasonForBan && !i.options.getString('reason')) return i.reply({ content: 'A reason is required for bans.', ephemeral: true });
-  await i.guild.members.ban(u.id, { reason: textReason(i, 'Moderation command'), deleteMessageSeconds: Number(i.client.config.moderation?.deleteMessageSeconds || 86400) });
+  await i.guild.members.ban(u.id, { reason: textReason(i, 'Moderation command'), deleteMessageSeconds: Number(i.client.config.moderation?.behavior?.defaultBanDeleteSeconds ?? 0) });
   await i.reply(`🔨 Banned ${u.tag}`);
 });
 
