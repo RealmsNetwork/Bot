@@ -107,6 +107,25 @@ commands.push(command(unban, PermissionFlagsBits.BanMembers, async i => {
   await i.reply(`✅ Unbanned ${id}`);
 }));
 
+const tempban = new SlashCommandBuilder().setName('tempban').setDescription('Temporarily ban a member');
+addUser(tempban);
+tempban.addIntegerOption(o => o.setName('minutes').setDescription('1-40320').setMinValue(1).setMaxValue(40320).setRequired(true));
+addReason(tempban);
+commands.push(command(tempban, PermissionFlagsBits.BanMembers, async i => {
+  const u = i.options.getUser('user', true);
+  const m = await fetchMember(i.guild, u.id);
+  if (m && !canAct(i.client, m, 'ban')) return i.reply({ content: 'I cannot act on that member.', ephemeral: true });
+  if (await isBanned(i.guild, u.id)) return i.reply({ content: 'That user is already banned.', ephemeral: true });
+  const minutes = i.options.getInteger('minutes', true);
+  const reason = textReason(i, 'Temporary ban');
+  await i.guild.members.ban(u.id, { reason, deleteMessageSeconds: Number(i.client.config.moderation?.behavior?.defaultBanDeleteSeconds || 0) });
+  const expiresAt = Date.now() + minutes * 60000;
+  const list = await i.client.db.get(i.guildId, 'tempbans', []);
+  list.push({ user: u.id, moderator: i.user.id, reason, expiresAt });
+  await i.client.db.set(i.guildId, 'tempbans', list);
+  await i.reply(`⏱️ Temporarily banned ${u.tag} for **${minutes} minute(s)**.`);
+}));
+
 const baninfo = new SlashCommandBuilder().setName('baninfo').setDescription('Check whether a user is banned')
 baninfo.addStringOption(o => o.setName('id').setDescription('Discord user ID').setRequired(true));
 commands.push(command(baninfo, PermissionFlagsBits.BanMembers, async i => {
@@ -257,4 +276,25 @@ commands.push(command(history, PermissionFlagsBits.ModerateMembers, async i => {
   await i.reply({ content: rows.length ? rows.join('\n') : `No cases found for ${u.tag}.`, ephemeral: true });
 }));
 
-module.exports = { commands };
+async function initialize(client) {
+  const sweep = async () => {
+    for (const guild of client.guilds.cache.values()) {
+      const list = await client.db.get(guild.id, 'tempbans', []);
+      if (!Array.isArray(list) || !list.length) continue;
+      const keep = [];
+      for (const entry of list) {
+        if (!entry?.user || Number(entry.expiresAt) > Date.now()) { if (entry?.user) keep.push(entry); continue; }
+        if (await isBanned(guild, entry.user)) await guild.members.unban(entry.user, 'Temporary ban expired').catch(() => {});
+      }
+      if (keep.length !== list.length) await client.db.set(guild.id, 'tempbans', keep);
+    }
+  };
+  await sweep();
+  const timer = setInterval(() => void sweep().catch(error => console.error('[Moderation] Tempban sweep failed:', error?.message || error)), 30000);
+  timer.unref?.();
+  client.moderationTempbanTimer = timer;
+}
+async function destroy(client) {
+  if (client.moderationTempbanTimer) clearInterval(client.moderationTempbanTimer);
+}
+module.exports = { initialize, destroy, commands };
