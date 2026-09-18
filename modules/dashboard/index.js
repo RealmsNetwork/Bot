@@ -68,6 +68,12 @@ function readRaw(file) { return fs.existsSync(file) ? fs.readFileSync(file, 'utf
 function writeYamlAtomic(file, data) { const tmp = `${file}.tmp`; fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(tmp, yaml.dump(data, { noRefs: true, lineWidth: -1 }), 'utf8'); fs.renameSync(tmp, file); }
 const SECRET_KEY = /^(token|secret|password|passphrase|apiKey|api_key|privateKey|private_key|webhookToken|connectionString|databaseUrl)$/i;
 const REDACTED = '__REALMS_REDACTED__';
+function redactScalar(value) {
+  if (typeof value !== 'string') return value;
+  if (/^https?:\/\/[^\s]*discord(?:app)?\.com\/api\/webhooks\/\d+\/[^\s]+$/i.test(value)) return REDACTED;
+  if (/^[a-z][a-z0-9+.-]*:\/\/[^\s/:]+:[^\s@]+@/i.test(value)) return REDACTED;
+  return value;
+}
 function redactSecrets(value) {
   if (Array.isArray(value)) return value.map(redactSecrets);
   if (value && typeof value === 'object') {
@@ -75,10 +81,11 @@ function redactSecrets(value) {
     for (const [key, item] of Object.entries(value)) out[key] = SECRET_KEY.test(key) ? REDACTED : redactSecrets(item);
     return out;
   }
-  return value;
+  return redactScalar(value);
 }
 function restoreSecrets(next, current) {
   if (Array.isArray(next) || Array.isArray(current)) return next;
+  if (typeof next === 'string' && next === REDACTED) return current;
   if (next && typeof next === 'object' && current && typeof current === 'object') {
     for (const [key, value] of Object.entries(next)) {
       if (value === REDACTED && Object.prototype.hasOwnProperty.call(current, key)) next[key] = current[key];
@@ -150,7 +157,7 @@ function moduleInfo(name, client, config) {
   const dir = path.join(root, 'modules', name);
   const basicFile = path.join(dir, 'config.yml');
   const advancedFile = path.join(dir, 'advanced.yml');
-  const basic = readYaml(basicFile, { enabled: false, advanced: false });
+  const basic = redactSecrets(readYaml(basicFile, { enabled: false, advanced: false }));
   return {
     name,
     enabled: moduleEnabled(name, config),
@@ -159,7 +166,7 @@ function moduleInfo(name, client, config) {
     loaded: client.modules.has(name),
     commands: client.modules.get(name)?.definition?.commands?.length || 0,
     basic,
-    advanced: readYaml(advancedFile, {})
+    advanced: redactSecrets(readYaml(advancedFile, {}))
   };
 }
 function guildInfo(guild) {
@@ -225,6 +232,7 @@ async function initialize(client, config, moduleConfig) {
     console.warn(`[AdminPanel] ${tokenEnv} is not set; panel will not start.`);
     return;
   }
+  if (cfg.public === true && token.length < 32) throw new Error('Public admin panel tokens must be at least 32 characters long');
   const host = cfg.host || '127.0.0.1';
   const port = Number(cfg.port || 8787);
   const maxBodyBytes = Math.min(8 * 1024 * 1024, Math.max(16 * 1024, Number(cfg.maxBodyBytes || 1024 * 1024)));
@@ -358,11 +366,9 @@ async function initialize(client, config, moduleConfig) {
         } else return json(res, 400, { error: 'Invalid config target' });
         if (!fs.existsSync(file)) return json(res, 404, { error: 'Config file not found' });
         const raw = readRaw(file);
-        if (kind === 'basic' && scope === 'root') {
-          let parsed;
-          try { parsed = yaml.load(raw); } catch { parsed = null; }
-          if (safePlainObject(parsed)) return json(res, 200, { scope, module: name, kind, content: yaml.dump(redactSecrets(parsed), { noRefs: true, lineWidth: -1 }) });
-        }
+        let parsed;
+        try { parsed = yaml.load(raw); } catch { parsed = null; }
+        if (safePlainObject(parsed)) return json(res, 200, { scope, module: name, kind, content: yaml.dump(redactSecrets(parsed), { noRefs: true, lineWidth: -1 }) });
         return json(res, 200, { scope, module: name, kind, content: raw });
       }
 
