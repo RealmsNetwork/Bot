@@ -1,4 +1,5 @@
 const { EmbedBuilder, PermissionFlagsBits } = require('discord.js');
+const { targetGuard, isBanned } = require('../../lib/guards);
 
 function list(value) { return Array.isArray(value) ? value.map(String).filter(Boolean) : []; }
 function matchesLink(content) { return /https?:\/\/\S+/i.test(content); }
@@ -28,10 +29,12 @@ async function initialize(client, config) {
   const enforce = async (message, reason, match) => {
     if (c.deleteMessage !== false) await message.delete().catch(() => {});
     const member = message.member;
+    if (member && targetGuard(client, member, { action: Number(c.timeoutMinutes || 0) > 0 ? 'timeout' : 'moderate' })) return logHit(message, 'Skipped unsafe target', reason);
     if (c.warn === true && member) {
       const key = `warnings:${member.id}`;
       const current = await client.db.get(message.guildId, key, []);
-      current.push({ id: Date.now().toString(36), reason: `AutoMod: ${reason}`, moderator: client.user?.id, at: Date.now() });
+      const maxWarnings = Math.max(1, Number(c.maxWarnings || 10));
+      if (current.length < maxWarnings) current.push({ id: Date.now().toString(36), reason: `AutoMod: ${reason}`, moderator: client.user?.id, at: Date.now() });
       await client.db.set(message.guildId, key, current).catch(() => {});
     }
     if (Number(c.timeoutMinutes || 0) > 0 && member?.moderatable) await member.timeout(Math.min(28 * 24 * 60, Number(c.timeoutMinutes)) * 60000, `AutoMod: ${reason}`).catch(() => {});
@@ -101,7 +104,7 @@ async function initialize(client, config) {
     joins.set(key, times);
     if (times.length >= max) {
       const me = member.guild.members.me;
-      if (me?.permissions.has(PermissionFlagsBits.BanMembers) && member.bannable) await member.ban({ reason: 'AutoMod raid protection' }).catch(() => {});
+      if (me?.permissions.has(PermissionFlagsBits.BanMembers) && !await isBanned(member.guild, member.id) && !targetGuard(client, member, { action: 'ban' })) await member.ban({ reason: 'AutoMod raid protection' }).catch(() => {});
       const channel = client.channels.cache.get(c.logChannelId);
       if (channel?.isTextBased?.()) await channel.send({ content: `Raid protection detected rapid joins in **${member.guild.name}**.`, allowedMentions: { parse: [] } }).catch(() => {});
     }
