@@ -1,0 +1,42 @@
+enabled: false
+advanced: false
+behavior:
+  deleteCommandMessages: false
+  dmUsers: true
+  notifyModerators: true
+  hierarchyProtection: true
+  requireReasonForBan: false
+  defaultBanDeleteSeconds: 0
+  maxBulkTargets: 50
+  requireTargetMemberForKick: true
+  refuseAlreadyBanned: true
+  refuseNotBannedUnban: true
+  refuseDuplicateWarnings: true
+  maxReasonLength: 1000
+cases:
+  enabled: true
+  persist: true
+  includeModerator: true
+  includeReason: true
+warnings:
+  maxWarnings: 10
+  preventDuplicate: false
+  actions: []
+purge:
+  maxMessages: 1000
+  allowBots: true
+  allowUsers: true
+  requireManageMessages: true
+slowmode:
+  maxSeconds: 21600
+logging:
+  enabled: true
+  channelId: ""
+permissions:
+  kick: ModerateMembers
+  ban: BanMembers
+  massban: BanMembers
+  timeout: ModerateMembers
+  warn: ModerateMembers
+  purge: ManageMessages
+  channel: ManageChannels
