@@ -154,9 +154,27 @@ async function handle(req, res, url, client, cfg, body, log) {
   }
 
   if (req.method === 'GET' && sub === 'bans') {
+    const me = await meOf(guild);
+    if (!requirePermission(me, PermissionFlagsBits.BanMembers, res)) return true;
     const bans = await guild.bans.fetch().catch(() => null);
     if (!bans) return fail(res, 403, 'Unable to fetch bans'), true;
     return send(res, 200, { items: [...bans.values()].map(b => ({ id: b.user.id, username: b.user.username, globalName: b.user.globalName, reason: b.reason || null })) }), true;
+  }
+
+  const unbanMatch = sub.match(/^bans\/([^/]+)\/unban$/);
+  if (req.method === 'POST' && unbanMatch) {
+    const userId = String(unbanMatch[1]);
+    if (!/^\d{17,20}$/.test(userId)) return fail(res, 400, 'Invalid user ID'), true;
+    if (!requireWrite(cfg, res)) return true;
+    const me = await meOf(guild);
+    if (!requirePermission(me, PermissionFlagsBits.BanMembers, res)) return true;
+    const ban = await guild.bans.fetch(userId).catch(() => null);
+    if (!ban) return fail(res, 409, 'User is not currently banned'), true;
+    const data = await body();
+    const reason = String(data.reason || 'Admin dashboard').slice(0, 512);
+    await guild.members.unban(userId, reason).catch(e => { throw Object.assign(new Error(e.message), { status: 400 }); });
+    log('discord_member_unban', { guildId, userId, reason });
+    return send(res, 200, { ok: true, userId }), true;
   }
 
   if (req.method === 'GET' && sub === 'analytics') {
@@ -180,7 +198,7 @@ async function handle(req, res, url, client, cfg, body, log) {
     if (!requirePermission(me, PermissionFlagsBits.ManageWebhooks, res)) return true;
     const hooks = await guild.fetchWebhooks().catch(() => null);
     if (!hooks) return fail(res, 500, 'Unable to fetch webhooks'), true;
-    return send(res, 200, { items: [...hooks.values()].map(w => ({ id: w.id, name: w.name, type: w.type, channelId: w.channelId, ownerId: w.owner?.id || null, url: w.url || null, hasToken: !!w.token })) }), true;
+    return send(res, 200, { items: [...hooks.values()].map(w => ({ id: w.id, name: w.name, type: w.type, channelId: w.channelId, ownerId: w.owner?.id || null, hasToken: !!w.token })) }), true;
   }
 
   const memberMatch = sub.match(/^member\/([^/]+)(?:\/(.*))?$/);
@@ -411,7 +429,7 @@ async function handle(req, res, url, client, cfg, body, log) {
     if (!channel.permissionsFor(me)?.has(PermissionFlagsBits.ManageWebhooks)) return fail(res, 403, 'Bot cannot manage webhooks in that channel'), true;
     const webhook = await channel.createWebhook({ name: String(data.name || 'RealmsNetwork Webhook').slice(0, 80), avatar: data.avatar ? String(data.avatar).slice(0, 2048) : undefined, reason: String(data.reason || 'Admin dashboard') });
     log('webhook_create', { guildId, webhookId: webhook.id, channelId: channel.id });
-    return send(res, 200, { ok: true, webhook: { id: webhook.id, name: webhook.name, channelId: webhook.channelId, url: webhook.url, token: webhook.token || null } }), true;
+    return send(res, 200, { ok: true, webhook: { id: webhook.id, name: webhook.name, channelId: webhook.channelId, hasToken: !!webhook.token } }), true;
   }
 
   const webhookMatch = sub.match(/^webhooks\/([^/]+)(?:\/(.*))?$/);

@@ -108,6 +108,8 @@ adminPanel:
   allowReload: true
   allowModuleToggle: true
   allowConfigWrite: false
+  maxSessions: 100
+  requestsPerMinute: 240
 
 # Advanced files are created automatically for modules.
 advancedFiles: true

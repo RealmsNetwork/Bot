@@ -20,6 +20,8 @@ let requiredMissing=[];for(const[name,entry]of packages){if(resolveInstalled(nam
 require('dotenv').config({quiet:true});
 let yaml;try{yaml=require('js-yaml');}catch(e){error(`Required dependency js-yaml is unavailable: ${e.message}`);process.exit(1);}
 let config;try{config=require('./lib/config').loadConfig();}catch(e){error(`Could not load config.yml: ${e.message}`);process.exit(1);}
+const panelEnabled=config.adminPanel?.enabled===true||config.dashboard?.enabled===true;
+if(panelEnabled){addPackage('@tailwindcss/cli@4.3.3','admin-panel');addPackage('tailwindcss@4.3.3','admin-panel');}
 function moduleDirs(base){if(!fs.existsSync(base))return[];return fs.readdirSync(base,{withFileTypes:true}).filter(x=>x.isDirectory()).map(x=>path.join(base,x.name));}
 function readYaml(file){try{return yaml.load(fs.readFileSync(file,'utf8'))||{};}catch(e){warn(`Invalid YAML ${path.relative(root,file)}: ${e.message}`);return{};}}
 let enabledModules=0;
@@ -29,6 +31,7 @@ const shardSetting=config.sharding?.enabled===true?(config.sharding?.totalShards
 banner({version,node:process.version,platform:`${process.platform}/${process.arch}`,modules:`${enabledModules} enabled`,database:String(config.database?.enabled===true?config.database?.primary||'enabled':'disabled'),shards:shardSetting});
 boot(`Working directory: ${root}`);boot(`Process: ${process.pid} | ${process.execPath}`);boot(`Configuration: ${path.basename(path.join(root,'config.yml'))} | release ${config.release||'unknown'}`);
 const missing=[];let already=0;for(const[name,entry]of packages){if(resolveInstalled(name)){already++;if(entry.source!=='required')ok(`${entry.spec} already installed`);}else missing.push(entry);}if(!installMissing(missing))process.exit(1);info(`Dependencies: ${already} already present | ${missing.length} installed | ${packages.size} total`);
+if(panelEnabled&&!fs.existsSync(path.join(root,'modules','dashboard','public','admin.css'))){info('Building local admin panel assets');const npm=process.env.npm_execpath||'npm';const args=['run','build:panel'];const useNode=String(npm).endsWith('.js');const result=spawnSync(useNode?process.execPath:npm,useNode?[npm,...args]:args,{cwd:root,stdio:'inherit'});if(result.status!==0){error('Admin panel CSS build failed');process.exit(1);}}
 if(!process.env.DISCORD_TOKEN||process.env.DISCORD_TOKEN==='YOUR_BOT_TOKEN_HERE'){error('Set DISCORD_TOKEN in .env');process.exit(1);}ok('Dependency bootstrap complete');rule();
 const {ShardingManager}=require('discord.js');
 let manager=null;
