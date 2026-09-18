@@ -1,6 +1,6 @@
 # RealmsNetwork Bot v0.2 advanced-capable configuration
-# Keep secrets in .env. Module enable state lives in the root config.yml; module config.yml files contain module settings.
-version: 5
+# Keep secrets in .env. Basic module behavior lives in modules/<name>/config.yml.
+version: 4
 release: "0.2.0"
 
 guildId: "YOUR_GUILD_ID_HERE"
@@ -26,9 +26,6 @@ runtime:
   crashProtection: true
   cacheSize: 2000
   maxListeners: 200
-  strictCommandChecks: true
-  rejectUnknownInteractions: true
-  maxCommandExecutionMs: 30000
   healthChecks: true
   diagnostics: true
   logLevel: info
@@ -51,8 +48,6 @@ commands:
 
 permissions:
   ownerBypass: true
-  strict: true
-  requireGuildMember: true
   managerRoles: []
   adminRoles: []
   moderatorRoles: []
@@ -108,8 +103,10 @@ adminPanel:
   allowReload: true
   allowModuleToggle: true
   allowConfigWrite: false
+  maxSessions: 100
+  requestsPerMinute: 240
 
-# Advanced files are created automatically for modules.
+# These are created automatically for every module and should not be removed.
 advancedFiles: true
 
 ai:
@@ -127,13 +124,7 @@ ai:
 
 platform: { enabled: false }
 aiLegacy: { enabled: false }
-security:
-  enabled: false
-  strictChecks: true
-  ignoreBots: true
-  ignoreStaff: true
-  requireReason: false
-  deleteMessageSeconds: 0
+security: { enabled: false }
 moderation: { enabled: false }
 automod: { enabled: false }
 logging: { enabled: false }

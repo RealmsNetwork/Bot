@@ -10,3 +10,5 @@ allowModuleToggle: true
 allowConfigWrite: false
 sessionHours: 8
 maxBodyBytes: 1048576
+maxSessions: 100
+requestsPerMinute: 240
