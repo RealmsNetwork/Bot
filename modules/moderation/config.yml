@@ -9,6 +9,11 @@ behavior:
   requireReasonForBan: false
   defaultBanDeleteSeconds: 0
   maxBulkTargets: 50
+  requireTargetMemberForKick: true
+  refuseAlreadyBanned: true
+  refuseNotBannedUnban: true
+  refuseDuplicateWarnings: true
+  maxReasonLength: 1000
 
 cases:
   enabled: true
@@ -18,10 +23,12 @@ cases:
 
 warnings:
   maxWarnings: 10
+  preventDuplicate: false
   actions: []
 
 purge:
   maxMessages: 1000
+  requireManageMessages: true
   allowBots: true
   allowUsers: true
 
