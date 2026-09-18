@@ -372,15 +372,20 @@ async function initialize(client, config, moduleConfig) {
         const scope = String(data.scope || '');
         const name = String(data.module || '');
         const kind = String(data.kind || 'basic');
+        if (!['basic', 'advanced'].includes(kind)) return json(res, 400, { error: 'Invalid config kind' });
         let file;
         if (scope === 'root') file = path.join(root, 'config.yml');
-        else if (scope === 'module' && safeModule(name)) file = path.join(root, 'modules', name, kind === 'advanced' ? 'advanced.yml' : 'config.yml');
-        else return json(res, 400, { error: 'Invalid config target' });
+        else if (scope === 'module' && safeModule(name)) {
+          const dir = path.join(root, 'modules', name);
+          if (!fs.existsSync(dir)) return json(res, 404, { error: 'Module not found' });
+          file = path.join(dir, kind === 'advanced' ? 'advanced.yml' : 'config.yml');
+        } else return json(res, 400, { error: 'Invalid config target' });
         const content = String(data.content || '');
         if (content.length > 512 * 1024) return json(res, 413, { error: 'Configuration too large' });
         let parsed;
         try { parsed = yaml.load(content); } catch (e) { return json(res, 400, { error: `Invalid YAML: ${e.message}` }); }
         if (!safePlainObject(parsed)) return json(res, 400, { error: 'Configuration root must be a YAML mapping/object' });
+        if (scope === 'module' && Object.prototype.hasOwnProperty.call(parsed, 'enabled')) return json(res, 400, { error: 'Module enable state is controlled by the root configuration' });
         const existing = readYaml(file, {});
         parsed = restoreSecrets(parsed, existing);
         writeYamlAtomic(file, parsed);
