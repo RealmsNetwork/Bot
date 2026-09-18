@@ -1,6 +1,7 @@
-# RealmsNetwork Bot V2/V3 migrations
+# RealmsNetwork Bot configuration migrations
 
 ## Automatic migrations
+The current root schema is V5. V1-V4 configurations are upgraded automatically, with a timestamped backup before changes.
 The runtime upgrades the root configuration when needed and keeps a backup before changing it.
 
 ### V1 -> V2/V3
