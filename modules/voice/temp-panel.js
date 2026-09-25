@@ -20,6 +20,8 @@ let cleanupRunning = false;
 const selections = new Map();
 const SELECTION_TTL_MS = 10 * 60 * 1000;
 const MAX_SELECTIONS = 5000;
+const PANEL_TOPIC_PREFIX = 'RealmsNetwork temporary VC panel v2 | ';
+const LEGACY_PANEL_TOPIC_PREFIX = 'RealmsNetwork temporary VC panel | ';
 
 function cfg(client) { return client.modules.get('voice')?.config || {}; }
 function tc(client) { return cfg(client).temporaryVoice || {}; }
@@ -50,17 +52,43 @@ function roomSnapshot(room) {
   };
 }
 
+function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
+
 async function persistRoom(client, room) {
-  if (!client?.db?.set || !room?.guildId || !room?.voiceChannelId) return;
-  const snapshot = roomSnapshot(room);
-  const serialized = JSON.stringify(snapshot);
-  if (room._persistedSnapshot === serialized) return;
-  try {
-    await client.db.set(room.guildId, stateKey(room), snapshot);
-    room._persistedSnapshot = serialized;
-  } catch (e) {
-    console.error('[TempVC] Failed to persist room state:', e?.message || e);
-  }
+  if (!client?.db?.set || !room?.guildId || !room?.voiceChannelId) return true;
+  const desired = JSON.stringify(roomSnapshot(room));
+  if (!room.persistenceDirty && room._persistedSnapshot === desired) return true;
+  if (room._persistPromise) return room._persistPromise;
+
+  const promise = (async () => {
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      const snapshot = roomSnapshot(room);
+      const serialized = JSON.stringify(snapshot);
+      try {
+        await client.db.set(room.guildId, stateKey(room), snapshot);
+        room._persistedSnapshot = serialized;
+        room.persistenceDirty = false;
+        if (JSON.stringify(roomSnapshot(room)) !== serialized) {
+          room.persistenceDirty = true;
+          if (attempt < 3) { await sleep(50); continue; }
+          return false;
+        }
+        return true;
+      } catch (e) {
+        room.persistenceDirty = true;
+        if (attempt === 3) {
+          console.error('[TempVC] Failed to persist room state after 3 attempts:', e?.message || e);
+          return false;
+        }
+        await sleep(250 * 2 ** (attempt - 1));
+      }
+    }
+    return false;
+  })();
+
+  room._persistPromise = promise;
+  try { return await promise; }
+  finally { if (room._persistPromise === promise) room._persistPromise = null; }
 }
 
 async function deletePersistedRoom(client, room) {
@@ -172,6 +200,17 @@ function canAccess(interaction, room) {
   if (room.bannedUsers.has(interaction.user.id)) return false;
   if (interaction.user.id === room.ownerId || room.accessUsers.has(interaction.user.id)) return true;
   return [...room.accessRoles].some(id => interaction.member.roles?.cache?.has(id));
+}
+
+function canControlTts(interaction, room, client) {
+  normalizeRoom(room, client);
+  if (!room || room.bannedUsers.has(interaction.user.id)) return false;
+  const c = tc(client);
+  if (c.allowOwnerTts === false) return false;
+  if (c.ownerOnlyControl === true || room.operatorControls === false) return interaction.user.id === room.ownerId;
+  if (interaction.user.id === room.ownerId) return true;
+  if (room.accessUsers.has(interaction.user.id)) return true;
+  return [...room.accessRoles].some(id => interaction.member?.roles?.cache?.has(id));
 }
 
 function ownerOnlyAction(action) {
@@ -558,7 +597,7 @@ function buildPayload(client, room, extras = {}) {
 
 async function refresh(client, room, page = room.page || 'overview') {
   normalizeRoom(room,client);
-  await persistRoom(client,room);
+  if (!(await persistRoom(client,room))) throw new Error('Temporary VC state could not be persisted. The change was not safely confirmed.');
   room.page=page;
   const guild=client.guilds.cache.get(room.guildId);
   const panel=guild?.channels.cache.get(room.panelChannelId);
@@ -614,7 +653,7 @@ async function create(client,member,voice,room){
     name:panelSlug(client,voice.name),
     type:ChannelType.GuildText,
     parent:c.categoryId || voice.parentId || undefined,
-    topic:'RealmsNetwork temporary VC panel | owner='+member.id+' | voice='+voice.id,
+    topic:PANEL_TOPIC_PREFIX+'owner='+member.id+' | voice='+voice.id,
     permissionOverwrites:panelOverwrites(guild,member.id),
     reason:'Create temporary voice room control panel'
   });
