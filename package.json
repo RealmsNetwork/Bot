@@ -48,5 +48,10 @@
     "@tailwindcss/cli": "4.3.3",
     "tailwindcss": "4.3.3",
     "nodemon": "3.1.14"
+  },
+  "allowScripts": {
+    "@parcel/watcher": true,
+    "better-sqlite3": true,
+    "@discordjs/opus": true
   }
 }
