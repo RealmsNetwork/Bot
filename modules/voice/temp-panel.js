@@ -310,20 +310,20 @@ function canControl(interaction, room, client, action) {
 
 function pageMenu(page) {
   const pages = [
-    ['overview','Overview','Room status and quick actions'],
-    ['room','Room','Lock, name, limit, bitrate, region and chat controls'],
-    ['members','Members','Kick, mute, deafen and inspect members'],
-    ['moderation','Moderation','Kick and ban members from this room'],
-    ['access','Access','Choose who can use this control panel'],
-    ['tts','TTS','Provider, voice, language and AutoTTS'],
-    ['permissions','Permissions','Panel and voice permission synchronization'],
-    ['utilities','Utilities','Refresh, rebuild, invites and cleanup'],
-    ['danger','Danger Zone','Reset or delete the temporary room']
+    ['overview','Overview','See your room'],
+    ['room','Room','Change room settings'],
+    ['members','Members','Manage people'],
+    ['moderation','Moderation','Kick or ban people'],
+    ['access','Access','Choose who can use these controls'],
+    ['tts','TTS','Speak with text'],
+    ['permissions','Permissions','Choose who can use the room'],
+    ['utilities','More','More room options'],
+    ['danger','Danger Zone','Reset or delete the room']
   ];
   return new ActionRowBuilder().addComponents(
     new StringSelectMenuBuilder()
       .setCustomId('rn-tvc:page')
-      .setPlaceholder('Navigate temporary VC control center...')
+      .setPlaceholder('Choose a section...')
       .addOptions(pages.map(([value,label,description]) => ({
         value, label, description, default: value === page
       })))
@@ -369,7 +369,7 @@ function buildPayload(client, room, extras = {}) {
   if (page === 'overview') {
     description = (c.panelDescription || 'Manage your temporary voice room.') +
       '\n\n' + status(room, voice) +
-      '\n\nThis control center only affects this temporary room.';
+      '\n\nManage your room here.';
     rows.push(
       new ActionRowBuilder().addComponents(
         button(room.locked ? 'unlock' : 'lock', room.locked ? 'Unlock Room' : 'Lock Room', room.locked ? ButtonStyle.Success : ButtonStyle.Primary),
@@ -393,7 +393,7 @@ function buildPayload(client, room, extras = {}) {
       )
     );
   } else if (page === 'room') {
-    description = '### Room Administration\nEdit the actual Discord voice channel and its room behavior.';
+    description = '### Room Settings\nChange how your room works.';
     rows.push(
       new ActionRowBuilder().addComponents(
         button('lock','Lock Room',ButtonStyle.Primary,room.locked),
@@ -416,7 +416,7 @@ function buildPayload(client, room, extras = {}) {
       )
     );
   } else if (page === 'members') {
-    description = '### Member Control\nSelect a member with the menu. Moderation applies to people in this room.';
+    description = '### Members\nChoose someone in your room.';
     rows.push(
       new ActionRowBuilder().addComponents(
         new UserSelectMenuBuilder()
@@ -440,7 +440,7 @@ function buildPayload(client, room, extras = {}) {
       )
     );
   } else if (page === 'moderation') {
-    description = '### Voice Room Moderation\nKick disconnects once. Ban blocks Connect until the owner unbans the member.';
+    description = '### Moderation\nKick or ban someone from your room.';
     rows.push(
       new ActionRowBuilder().addComponents(
         new UserSelectMenuBuilder()
@@ -466,8 +466,8 @@ function buildPayload(client, room, extras = {}) {
   } else if (page === 'access') {
     const users = [...room.accessUsers].filter(id => id !== room.ownerId).map(id => '<@' + id + '>').join(', ') || 'None';
     const roles = [...room.accessRoles].map(id => '<@&' + id + '>').join(', ') || 'None';
-    description = '### Panel Access\n**Users:** ' + users + '\n**Roles:** ' + roles +
-      '\n\nOwner chooses who can open the panel. Operators can control non-dangerous features when panelAccessCanControl is enabled.';
+    description = '### Access\n**Users:** ' + users + '\n**Roles:** ' + roles +
+      '\n\nChoose who can use these controls.';
     rows.push(
       new ActionRowBuilder().addComponents(
         new UserSelectMenuBuilder().setCustomId('rn-tvc:access-user').setPlaceholder('Select a user...').setMinValues(1).setMaxValues(1)
@@ -537,8 +537,8 @@ function buildPayload(client, room, extras = {}) {
     const p = extras.pageNum || 0;
     const total = Math.max(1,Math.ceil(list.length/25));
     const items = list.slice(p*25,p*25+25);
-    description = '### Edge Voice Browser\nPage ' + (p+1) + ' of ' + total + ' • ' + list.length + ' API voices';
-    const select = new StringSelectMenuBuilder().setCustomId('rn-tvc:tts-voice').setPlaceholder('Choose an Edge voice...');
+    description = '### Voices\nPage ' + (p+1) + ' of ' + total + ' • ' + list.length + ' voices';
+    const select = new StringSelectMenuBuilder().setCustomId('rn-tvc:tts-voice').setPlaceholder('Choose a voice...');
     const options = items.map(v => ({
       label:String(v.FriendlyName || v.ShortName || v.Name || 'Voice').slice(0,100),
       value:String(v.ShortName || v.Name).slice(0,100),
@@ -558,8 +558,8 @@ function buildPayload(client, room, extras = {}) {
     const p = extras.pageNum || 0;
     const total = Math.max(1,Math.ceil(list.length/25));
     const items = list.slice(p*25,p*25+25);
-    description = '### Language Browser\nPage ' + (p+1) + ' of ' + total + ' • ' + list.length + ' API languages';
-    const select = new StringSelectMenuBuilder().setCustomId('rn-tvc:tts-language').setPlaceholder('Choose a Google language...');
+    description = '### Languages\nPage ' + (p+1) + ' of ' + total + ' • ' + list.length + ' languages';
+    const select = new StringSelectMenuBuilder().setCustomId('rn-tvc:tts-language').setPlaceholder('Choose a language...');
     const options = items.map(x => ({
       label:String(x.name).slice(0,100),
       value:String(x.code).slice(0,100),
@@ -576,27 +576,27 @@ function buildPayload(client, room, extras = {}) {
     ));
   } else if (page === 'permissions') {
     description = [
-      '### Permission Management',
-      '**Panel users:** ' + Math.max(0,room.accessUsers.size-1),
-      '**Panel roles:** ' + room.accessRoles.size,
-      '**Sync to VC:** ' + (room.syncPermissions !== false ? 'Enabled' : 'Disabled'),
-      '**Operator controls:** ' + (room.operatorControls !== false ? 'Enabled' : 'Disabled'),
+      '### Permissions',
+      '**People with access:** ' + Math.max(0,room.accessUsers.size-1),
+      '**Roles with access:** ' + room.accessRoles.size,
+      '**Room access:** ' + (room.syncPermissions !== false ? 'Synced' : 'Separate'),
+      '**Shared controls:** ' + (room.operatorControls !== false ? 'Enabled' : 'Disabled'),
       '',
       'Owner-only actions stay protected.'
     ].join('\n');
     rows.push(new ActionRowBuilder().addComponents(
-      button('sync-perms','Sync Panel → VC',ButtonStyle.Primary),
+      button('sync-perms','Update Permissions',ButtonStyle.Primary),
       button('toggle-sync',room.syncPermissions === false ? 'Enable Sync' : 'Disable Sync'),
       button('toggle-operators',room.operatorControls === false ? 'Enable Operators' : 'Disable Operators'),
       button('access','Manage Access'),
       button('refresh','Refresh')
     ));
   } else if (page === 'utilities') {
-    description = '### Utilities\nRoom maintenance and helper actions.';
+    description = '### More\nExtra room options.';
     rows.push(
       new ActionRowBuilder().addComponents(
         button('refresh','Refresh'),
-        button('rebuild','Rebuild Panel',ButtonStyle.Primary),
+        button('rebuild','Refresh Panel',ButtonStyle.Primary),
         button('invite','Create Invite',ButtonStyle.Success),
         button('sync-perms','Sync Permissions'),
         button('tts-stop','Stop TTS',ButtonStyle.Danger)
@@ -609,7 +609,7 @@ function buildPayload(client, room, extras = {}) {
       )
     );
   } else {
-    description = '### Danger Zone\nReset Access clears custom panel access, roles and VC bans. Delete Room destroys both temporary channels.';
+    description = '### Danger Zone\nReset access or delete the room.';
     rows.push(new ActionRowBuilder().addComponents(
       button('reset-access','Reset Access',ButtonStyle.Danger),
       button('delete','Delete Room',ButtonStyle.Danger),
@@ -620,9 +620,9 @@ function buildPayload(client, room, extras = {}) {
   return {
     embeds:[new EmbedBuilder()
       .setColor(b.color)
-      .setTitle(b.server + ' • ' + (c.panelTitle || 'Voice Control Center'))
+      .setTitle(b.server + ' • ' + (c.panelTitle || 'Voice Control'))
       .setDescription(description)
-      .setFooter({text:b.footer + ' • temporary VC • ' + page})
+      .setFooter({text:b.footer + ' • ' + page})
       .setTimestamp()],
     components:rows.slice(0,5)
   };
