@@ -1085,7 +1085,10 @@ async function recover(client,rooms){
   for(const guild of client.guilds.cache.values()){
     const channels=await guild.channels.fetch().catch(()=>guild.channels.cache);
     for(const channel of channels.values()){
-      if(!channel?.isTextBased?.()||!channel.topic?.startsWith('RealmsNetwork temporary VC panel | '))continue;
+      if(!channel?.isTextBased?.())continue;
+      const isCurrentPanel=channel.topic?.startsWith(PANEL_TOPIC_PREFIX);
+      const isLegacyPanel=channel.topic?.startsWith(LEGACY_PANEL_TOPIC_PREFIX);
+      if(!isCurrentPanel&&!isLegacyPanel)continue;
       const owner=channel.topic.match(/owner=(\d+)/)?.[1];
       const voiceId=channel.topic.match(/voice=(\d+)/)?.[1];
       if(!owner||!voiceId)continue;
@@ -1119,7 +1122,7 @@ async function recover(client,rooms){
         ttsBrowser:{kind:null,page:0}
       };
 
-      if(!hasSavedState){
+      if(!hasSavedState && isLegacyPanel){
         for(const [id,ow] of channel.permissionOverwrites.cache){
           if(id===guild.roles.everyone.id||id===guild.members.me?.id)continue;
           if(ow.type===0&&ow.allow.has(PermissionFlagsBits.ViewChannel))room.accessRoles.add(id);
@@ -1129,6 +1132,10 @@ async function recover(client,rooms){
           if(id===guild.roles.everyone.id||id===guild.members.me?.id||id===owner)continue;
           if(ow.type===1&&ow.deny.has(PermissionFlagsBits.Connect))room.bannedUsers.add(id);
         }
+      }
+
+      if(isLegacyPanel){
+        await channel.setTopic(PANEL_TOPIC_PREFIX+'owner='+room.ownerId+' | voice='+voice.id,'Migrate temporary VC panel metadata to v2').catch(()=>{});
       }
 
       if(tc(client).autoTransferOnOwnerLeave!==false&&!voice.members.has(room.ownerId)&&voice.members.size>0){
@@ -1144,7 +1151,7 @@ async function recover(client,rooms){
       }
 
       rooms.set(voice.id,room);
-      await refresh(client,room,'overview').catch(()=>{});
+      await refresh(client,room,'overview').catch(e=>console.error('[TempVC] Recovery refresh failed:',e?.message||e));
     }
   }
 }
@@ -1200,7 +1207,7 @@ async function channelUpdate(oldChannel,newChannel,client,rooms){
       if(panel){
         const desired=panelSlug(client,newChannel.name);
         if(panel.name!==desired)await panel.setName(desired,'Temporary VC room renamed').catch(()=>{});
-        const topic='RealmsNetwork temporary VC panel | owner='+room.ownerId+' | voice='+newChannel.id;
+        const topic=PANEL_TOPIC_PREFIX+'owner='+room.ownerId+' | voice='+newChannel.id;
         if(panel.topic!==topic)await panel.setTopic(topic,'Synchronize temporary VC recovery metadata').catch(()=>{});
       }
     }
