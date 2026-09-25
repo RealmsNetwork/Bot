@@ -228,7 +228,7 @@ function volumeValue(value) {
 }
 
 async function synthesizeEdge(text, file, settings = {}) {
-  const timeoutMs = Math.max(5000, Number(settings.timeoutMs ?? settings.timeout ?? DEFAULT_HTTP_TIMEOUT));
+  const timeoutMs = Math.max(1000, Number(settings.timeoutMs ?? settings.timeout ?? DEFAULT_HTTP_TIMEOUT));
   const tts = new EdgeTTS({
     voice: settings.voice || 'en-US-AriaNeural',
     lang: settings.lang || 'en-US',
