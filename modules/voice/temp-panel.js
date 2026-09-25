@@ -643,6 +643,13 @@ async function deleteRoom(client,rooms,room,guild,reason='Temporary voice room d
   }
 }
 
+function permissionPatch(overwrite, permissions) {
+  return Object.fromEntries(permissions.map(([name, flag]) => [
+    name,
+    !overwrite ? null : overwrite.allow.has(flag) ? true : overwrite.deny.has(flag) ? false : null
+  ]));
+}
+
 async function syncPermissions(room,guild,client){
   normalizeRoom(room,client);
   const voice=guild.channels.cache.get(room.voiceChannelId);
@@ -677,14 +684,18 @@ async function grant(room,guild,id,type,client){
     if(tc(client).panelAllowUserAccess===false)throw new Error('User access is disabled.');
   }
   const hadAccess=targetSet.has(id);
+  const panel=guild.channels.cache.get(room.panelChannelId);
+  const voice=guild.channels.cache.get(room.voiceChannelId);
+  const panelBefore=panel?.permissionOverwrites.cache.get(id);
+  const voiceBefore=voice?.permissionOverwrites.cache.get(id);
   targetSet.add(id);
   try{
     await syncPermissions(room,guild,client);
   }catch(e){
     if(!hadAccess){
       targetSet.delete(id);
-      await guild.channels.cache.get(room.panelChannelId)?.permissionOverwrites.edit(id,{ViewChannel:null,ReadMessageHistory:null,SendMessages:null}).catch(()=>{});
-      if(room.syncPermissions!==false)await guild.channels.cache.get(room.voiceChannelId)?.permissionOverwrites.edit(id,{ViewChannel:null,Connect:null,Speak:null}).catch(()=>{});
+      await panel?.permissionOverwrites.edit(id,permissionPatch(panelBefore,[['ViewChannel',PermissionFlagsBits.ViewChannel],['ReadMessageHistory',PermissionFlagsBits.ReadMessageHistory],['SendMessages',PermissionFlagsBits.SendMessages])).catch(()=>{});
+      if(room.syncPermissions!==false)await voice?.permissionOverwrites.edit(id,permissionPatch(voiceBefore,[['ViewChannel',PermissionFlagsBits.ViewChannel],['Connect',PermissionFlagsBits.Connect],['Speak',PermissionFlagsBits.Speak])).catch(()=>{});
     }
     throw e;
   }
@@ -698,13 +709,15 @@ async function revoke(room,guild,id,type,client){
   if(!hadAccess)return;
   const panel=guild.channels.cache.get(room.panelChannelId);
   const voice=guild.channels.cache.get(room.voiceChannelId);
+  const panelBefore=panel?.permissionOverwrites.cache.get(id);
+  const voiceBefore=voice?.permissionOverwrites.cache.get(id);
   try{
     await panel?.permissionOverwrites.edit(id,{ViewChannel:null,ReadMessageHistory:null,SendMessages:null});
     if(room.syncPermissions!==false)await voice?.permissionOverwrites.edit(id,{ViewChannel:null,Connect:null,Speak:null});
     targetSet.delete(id);
   }catch(e){
-    if(room.syncPermissions!==false)await voice?.permissionOverwrites.edit(id,{ViewChannel:true,Connect:true,Speak:true}).catch(()=>{});
-    await panel?.permissionOverwrites.edit(id,{ViewChannel:true,ReadMessageHistory:true,SendMessages:false}).catch(()=>{});
+    await panel?.permissionOverwrites.edit(id,permissionPatch(panelBefore,[['ViewChannel',PermissionFlagsBits.ViewChannel],['ReadMessageHistory',PermissionFlagsBits.ReadMessageHistory],['SendMessages',PermissionFlagsBits.SendMessages])).catch(()=>{});
+    if(room.syncPermissions!==false)await voice?.permissionOverwrites.edit(id,permissionPatch(voiceBefore,[['ViewChannel',PermissionFlagsBits.ViewChannel],['Connect',PermissionFlagsBits.Connect],['Speak',PermissionFlagsBits.Speak])).catch(()=>{});
     throw e;
   }
 }
