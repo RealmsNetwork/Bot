@@ -294,7 +294,7 @@ function actionEnabled(client, action) {
 }
 
 const TTS_CONTROL_ACTIONS = new Set([
-  'tts-enable','tts-disable','autotts-enable','autotts-disable',
+  'join','tts-enable','tts-disable','autotts-enable','autotts-disable',
   'prefix-enable','prefix-disable','tts-stop','speak','volume',
   'rate-down','rate-up','tts-voices','tts-languages','tts-voice-manual',
   'tts-provider','tts-language','tts-voice'
@@ -342,6 +342,7 @@ function status(room, voice) {
   return [
     '**Voice:** ' + (voice ? '<#' + voice.id + '>' : 'missing'),
     '**Owner:** <@' + room.ownerId + '>',
+    '**Bot:** ' + (voice?.guild?.members?.me?.voice?.channelId === room.voiceChannelId ? 'In VC' : 'Not in VC'),
     '**Members:** ' + (voice?.members?.size || 0) + '/' + (voice?.userLimit || '∞'),
     '**Bitrate:** ' + (voice ? Math.round(voice.bitrate / 1000) + ' kbps' : 'unknown'),
     '**Region:** ' + (voice?.rtcRegion || 'Automatic'),
@@ -495,8 +496,7 @@ function buildPayload(client, room, extras = {}) {
       '**Rate:** ' + s.rate + '%',
       '**Volume:** ' + s.volume + '%',
       '**Name prefix:** ' + (s.prefixName ? 'Enabled' : 'Disabled'),
-      '',
-      'Voice and language catalogs are pulled dynamically from their APIs.'
+      ''
     ].join('\n');
     rows.push(
       new ActionRowBuilder().addComponents(
@@ -510,10 +510,13 @@ function buildPayload(client, room, extras = {}) {
           )
       ),
       new ActionRowBuilder().addComponents(
+        button('join','Join VC',ButtonStyle.Success),
         button(s.enabled ? 'tts-disable' : 'tts-enable',s.enabled ? 'Disable TTS' : 'Enable TTS',s.enabled ? ButtonStyle.Danger : ButtonStyle.Success),
         button(s.autoTts ? 'autotts-disable' : 'autotts-enable',s.autoTts ? 'Disable AutoTTS' : 'Enable AutoTTS',s.autoTts ? ButtonStyle.Danger : ButtonStyle.Success),
         button(s.prefixName ? 'prefix-disable' : 'prefix-enable',s.prefixName ? 'No Name Prefix' : 'Add Name Prefix'),
-        button('speak','Speak',ButtonStyle.Primary),
+        button('speak','Speak',ButtonStyle.Primary)
+      ),
+      new ActionRowBuilder().addComponents(
         button('tts-stop','Stop',ButtonStyle.Danger)
       ),
       new ActionRowBuilder().addComponents(
@@ -1070,6 +1073,10 @@ async function handleButton(interaction,client,rooms){
     room.ttsConnection=null;
   }
   else if(action==='room-chat')return panelNotice(interaction,'Open <#'+room.voiceChannelId+'> to use Discord voice-channel chat and AutoTTS.');
+  else if(action==='join'){
+    await tts.join(room,client);
+    return panelUpdate(interaction,client,room,room.page);
+  }
   else if(action==='tts-enable')room.tts.enabled=true;
   else if(action==='tts-disable')room.tts.enabled=false;
   else if(action==='autotts-enable')room.tts.autoTts=true;
