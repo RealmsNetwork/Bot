@@ -273,6 +273,23 @@ async function remoteStream(url, timeoutMs = DEFAULT_HTTP_TIMEOUT, maxBytes = MA
 
 async function setBotMute(client,room,mute){try{const guild=client.guilds.cache.get(room.guildId);const me=await guild?.members.fetchMe().catch(()=>guild?.members.me);if(!me?.voice?.channelId||me.voice.channelId!==room.voiceChannelId)return false;if(me.voice.serverMute!==mute)await me.voice.setMute(mute,'Room TTS '+(mute?'idle':'speaking'));return true;}catch(e){console.error('[TempVC/TTS] Bot mute:',e?.message||e);return false;}}
 
+function pauseMusicForTts(client, room) {
+  const session = client.voiceSessions?.get(room.guildId);
+  if (!session?.connection || session.connection !== room.ttsConnection) return;
+  if (session.player?.state?.status !== AudioPlayerStatus.Playing) return;
+  if (session.player.pause(false)) room.ttsPausedMusic = true;
+}
+
+function resumeMusicAfterTts(client, room) {
+  if (!room.ttsPausedMusic) return;
+  room.ttsPausedMusic = false;
+  const session = client.voiceSessions?.get(room.guildId);
+  if (session?.connection !== room.ttsConnection) return;
+  if (session.current && session.player?.state?.status === AudioPlayerStatus.Paused) {
+    session.player.unpause();
+  }
+}
+
 function ensurePlayer(room,client) {
   if (!Array.isArray(room.ttsQueue)) room.ttsQueue = [];
   if (room.ttsPlaying === undefined) room.ttsPlaying = false;
@@ -401,6 +418,7 @@ function settingsFor(room, client) {
 async function playNext(room,client) {
   if (!room.ttsQueue?.length) {
     room.ttsPlaying = false;
+    resumeMusicAfterTts(client, room);
     return;
   }
   const item = room.ttsQueue[0];
@@ -446,6 +464,7 @@ async function playNext(room,client) {
       room.ttsPlaying = false;
       return;
     }
+    pauseMusicForTts(client, room);
     room.ttsConnection.subscribe(room.ttsPlayer);
     room.ttsPlaying = true;
     room.ttsCurrentFile = file;
@@ -539,6 +558,7 @@ async function stop(room,client) {
   room.ttsCurrentFile = null;
   room.ttsPlayer?.stop(true);
   if (currentFile) await fs.promises.rm(currentFile, { force: true }).catch(() => {});
+  resumeMusicAfterTts(client, room);
   try{const guild=client?.guilds?.cache?.get(room.guildId);const me=await guild?.members.fetchMe().catch(()=>guild?.members.me);if(me?.voice?.channelId===room.voiceChannelId&&me.voice.serverMute!==true)await me.voice.setMute(true,'Room TTS stopped');}catch{}
   return true;
 }
