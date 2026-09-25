@@ -35,9 +35,12 @@ function controlConfigEnabled(i) {
   const c = moduleConfig.temporaryVoice || {};
   const ttsConfig = moduleConfig.tts || {};
   return ttsConfig.panelEditable !== false &&
-    ttsConfig.allowUserVoiceSelection !== false &&
     c.allowOwnerTts !== false &&
     c.panelAllowTtsControl !== false;
+}
+
+function voiceSelectionEnabled(i) {
+  return i.client.modules.get('voice')?.config?.tts?.allowUserVoiceSelection !== false;
 }
 
 function runtimeRoom(i){
@@ -159,7 +162,7 @@ async function voiceBrowser(i){
   collector.on('end',async()=>{await i.editReply({components:[]}).catch(()=>{});});
 }
 
-async function setLanguage(i){if(!i.deferred&&!i.replied)await i.deferReply({flags:MessageFlags.Ephemeral});const r=runtimeRoom(i);if(!r)return i.editReply({content:'Join a voice channel first.'});if(!controlConfigEnabled(i)||!canControlTts(i,r))return i.editReply({content:'You do not have permission to change TTS settings for this room.'});const value=i.options.getString('language',true);try{const list=await tts.listLanguages();const match=list.find(x=>x.code.toLowerCase()===value.toLowerCase()||x.name.toLowerCase()===value.toLowerCase());if(!match)return i.editReply({content:'That Google language was not found. Use /ttslangs.'});r.tts=tts.settingsFor(r,i.client);r.tts.provider='google';r.tts.lang=match.code;return i.editReply({content:'Google TTS language set to **'+match.name+'** ('+match.code+').'});}catch(e){return i.editReply({content:'Language lookup failed: '+e.message});}}
+async function setLanguage(i){if(!i.deferred&&!i.replied)await i.deferReply({flags:MessageFlags.Ephemeral});const r=runtimeRoom(i);if(!r)return i.editReply({content:'Join a voice channel first.'});if(!controlConfigEnabled(i)||!voiceSelectionEnabled(i)||!canControlTts(i,r))return i.editReply({content:'You do not have permission to change TTS voice settings for this room.'});const value=i.options.getString('language',true);try{const list=await tts.listLanguages();const match=list.find(x=>x.code.toLowerCase()===value.toLowerCase()||x.name.toLowerCase()===value.toLowerCase());if(!match)return i.editReply({content:'That Google language was not found. Use /ttslangs.'});r.tts=tts.settingsFor(r,i.client);r.tts.provider='google';r.tts.lang=match.code;return i.editReply({content:'Google TTS language set to **'+match.name+'** ('+match.code+').'});}catch(e){return i.editReply({content:'Language lookup failed: '+e.message});}}
 
 const commands=[
   {data:new SlashCommandBuilder().setName('tts').setDescription('Speak text using the selected TTS provider').addStringOption(o=>o.setName('text').setDescription('Text to speak').setRequired(true)).addStringOption(o=>o.setName('provider').setDescription('TTS provider').addChoices({name:'Microsoft Edge',value:'edge'},{name:'Google',value:'google'},{name:'StreamElements / Polly',value:'polly'})).addStringOption(o=>o.setName('lang').setDescription('Language / locale code')).addStringOption(o=>o.setName('voice').setDescription('Voice name')),execute:async i=>speak(i,i.options.getString('provider')||'edge',i.options.getString('text',true),{lang:i.options.getString('lang'),voice:i.options.getString('voice')})},
@@ -172,7 +175,7 @@ const commands=[
   {data:new SlashCommandBuilder().setName('ttsvoices').setDescription('Browse Edge TTS voices'),execute:voiceBrowser},
   {data:new SlashCommandBuilder().setName('voices').setDescription('Browse Edge TTS voices'),execute:voiceBrowser},
   {data:new SlashCommandBuilder().setName('lang').setDescription('Set your room Google TTS language').addStringOption(o=>o.setName('language').setDescription('Language name or code').setRequired(true)),execute:setLanguage},
-  {data:new SlashCommandBuilder().setName('voice').setDescription('Set the Edge TTS voice').addStringOption(o=>o.setName('voice').setDescription('Edge voice short name').setRequired(true)),execute:async i=>{if(!i.deferred&&!i.replied)await i.deferReply({flags:MessageFlags.Ephemeral});const r=runtimeRoom(i);if(!r)return i.editReply({content:'Join a voice channel first.'});if(!controlConfigEnabled(i)||!canControlTts(i,r))return i.editReply({content:'You do not have permission to change TTS settings for this room.'});const name=i.options.getString('voice',true);try{const list=await tts.listVoices();const v=list.find(x=>(x.ShortName||x.Name)===name);if(!v)return i.editReply({content:'That Edge voice was not found. Use /ttsvoices.'});r.tts=tts.settingsFor(r,i.client);r.tts.provider='edge';r.tts.voice=name;r.tts.lang=v.Locale||r.tts.lang;return i.editReply({content:'Edge TTS voice set to **'+name+'**.'});}catch(e){return i.editReply({content:'Voice lookup failed: '+e.message});}}}
+  {data:new SlashCommandBuilder().setName('voice').setDescription('Set the Edge TTS voice').addStringOption(o=>o.setName('voice').setDescription('Edge voice short name').setRequired(true)),execute:async i=>{if(!i.deferred&&!i.replied)await i.deferReply({flags:MessageFlags.Ephemeral});const r=runtimeRoom(i);if(!r)return i.editReply({content:'Join a voice channel first.'});if(!controlConfigEnabled(i)||!voiceSelectionEnabled(i)||!canControlTts(i,r))return i.editReply({content:'You do not have permission to change TTS voice settings for this room.'});const name=i.options.getString('voice',true);try{const list=await tts.listVoices();const v=list.find(x=>(x.ShortName||x.Name)===name);if(!v)return i.editReply({content:'That Edge voice was not found. Use /ttsvoices.'});r.tts=tts.settingsFor(r,i.client);r.tts.provider='edge';r.tts.voice=name;r.tts.lang=v.Locale||r.tts.lang;return i.editReply({content:'Edge TTS voice set to **'+name+'**.'});}catch(e){return i.editReply({content:'Voice lookup failed: '+e.message});}}}
 ];
 
 module.exports={commands};
