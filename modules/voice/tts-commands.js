@@ -69,7 +69,7 @@ async function speak(i,provider,text,extra={}){
   if((extra.lang!==undefined||extra.voice!==undefined)&&!canCustomizeVoice)
     return i.editReply({content:'You do not have permission to override the room TTS voice or language.'});
   try{
-    await tts.speak(i.client,room,text,{id:i.user.id,displayName:i.member?.displayName},{provider,lang:extra.lang,voice:extra.voice});
+    await tts.speak(i.client,room,text,i.member,{provider,lang:extra.lang,voice:extra.voice});
     return i.editReply({content:'Speaking now.'});
   }catch(e){
     console.error('[TempVC/TTS] Command:',e?.stack||e);
