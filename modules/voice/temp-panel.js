@@ -200,7 +200,7 @@ async function makePayload(client, room) {
       button('undeafen','Undeafen',ButtonStyle.Success,false,'👂')
     ));
     rows.push(new ActionRowBuilder().addComponents(
-      button('ban-selected','Ban From VC',ButtonStyle.Danger,false,'⛔'),
+      button('ban-selected','Ban From VC',ButtonStyle.Danger,c.allowOwnerBan===false,'⛔'),
       button('transfer-selected','Transfer Owner',ButtonStyle.Success,c.allowOwnerTransfer===false,'👑'),
       button('panel-selected','Grant Panel',ButtonStyle.Primary,false,'🔑'),
       button('refresh','Refresh',ButtonStyle.Secondary,false,'🔄')
@@ -212,7 +212,7 @@ async function makePayload(client, room) {
       new UserSelectMenuBuilder().setCustomId('rn-tvc:ban-user').setPlaceholder('Select a user...').setMinValues(1).setMaxValues(1)
     ));
     rows.push(new ActionRowBuilder().addComponents(
-      button('ban-user','Ban From VC',ButtonStyle.Danger,false,'⛔'),
+      button('ban-user','Ban From VC',ButtonStyle.Danger,c.allowOwnerBan===false,'⛔'),
       button('unban-user','Unban From VC',ButtonStyle.Success,false,'✅'),
       button('refresh','Refresh',ButtonStyle.Secondary,false,'🔄')
     ));
@@ -532,9 +532,9 @@ async function handleButton(interaction,client,rooms) {
     if(action==='unmute')await target.voice.setMute(false,'Temporary VC owner action');
     if(action==='deafen')await target.voice.setDeaf(true,'Temporary VC owner action');
     if(action==='undeafen')await target.voice.setDeaf(false,'Temporary VC owner action');
-    if(action==='ban-selected')await applyBan(room,guild,target.id);
+    if(action==='ban-selected'){if(c.allowOwnerBan===false)return interaction.reply({content:'VC bans are disabled.',ephemeral:true});await applyBan(room,guild,target.id);}
   }
-  else if(action==='ban-user'){if(!memberId)return interaction.reply({content:'Select a user first.',ephemeral:true});await applyBan(room,guild,memberId);}
+  else if(action==='ban-user'){if(c.allowOwnerBan===false)return interaction.reply({content:'VC bans are disabled.',ephemeral:true});if(!memberId)return interaction.reply({content:'Select a user first.',ephemeral:true});await applyBan(room,guild,memberId);}
   else if(action==='unban-user'){if(!memberId)return interaction.reply({content:'Select a user first.',ephemeral:true});await removeBan(room,guild,memberId);}
   else if(action==='transfer-selected'){
     const target=memberId&&guild.members.cache.get(memberId);
