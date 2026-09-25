@@ -17,6 +17,8 @@ const tts = require('./tts-service');
 
 let cleanupTimer = null;
 const selections = new Map();
+const SELECTION_TTL_MS = 10 * 60 * 1000;
+const MAX_SELECTIONS = 5000;
 
 function cfg(client) { return client.modules.get('voice')?.config || {}; }
 function tc(client) { return cfg(client).temporaryVoice || {}; }
@@ -66,7 +68,29 @@ function selectionKey(interaction, kind) {
 }
 
 function selected(interaction, kind) {
-  return selections.get(selectionKey(interaction, kind));
+  const key = selectionKey(interaction, kind);
+  const entry = selections.get(key);
+  if (!entry) return null;
+  if (Date.now() - entry.at > SELECTION_TTL_MS) {
+    selections.delete(key);
+    return null;
+  }
+  return entry.value;
+}
+
+function rememberSelection(interaction, kind, value) {
+  const now = Date.now();
+  selections.set(selectionKey(interaction, kind), { value, at: now });
+  if (selections.size <= MAX_SELECTIONS) return;
+  for (const [key, entry] of selections) {
+    if (now - entry.at > SELECTION_TTL_MS) selections.delete(key);
+    if (selections.size <= MAX_SELECTIONS) break;
+  }
+  while (selections.size > MAX_SELECTIONS) {
+    const oldest = selections.keys().next().value;
+    if (oldest === undefined) break;
+    selections.delete(oldest);
+  }
 }
 
 async function panelNotice(interaction, content) {
@@ -561,13 +585,13 @@ function targetIsInRoom(member, room) {
 async function panelUpdate(interaction,client,room,page){
   if(!interaction.deferred&&!interaction.replied)await interaction.deferUpdate().catch(e=>console.error('[TempVC/Panel] deferUpdate:',e?.message||e));
   const msg=await refresh(client,room,page);
-  if(!msg)return interaction.editReply({content:'The temporary VC panel is no longer available.',embeds:[],components:[]}).catch(()=>{});
+  if(!msg)return interaction.editReply({content:'The temporary VC panel is no longer available.',embeds:[],components:[]}).catch(e=>console.error('[TempVC/Panel] editReply:',e?.message||e));
   const payload={
     content:msg.content || undefined,
     embeds:(msg.embeds||[]).map(x=>typeof x.toJSON==='function'?x.toJSON():x),
     components:(msg.components||[]).map(x=>typeof x.toJSON==='function'?x.toJSON():x)
   };
-  if(interaction.deferred||interaction.replied)return interaction.editReply(payload).catch(()=>{});
+  if(interaction.deferred||interaction.replied)return interaction.editReply(payload).catch(e=>console.error('[TempVC/Panel] editReply:',e?.message||e));
   return interaction.update(payload).catch(async e=>{
     console.error('[TempVC/Panel] Interaction update failed:',e?.message||e);
   });
@@ -719,7 +743,7 @@ async function handleSelect(interaction,client,rooms){
   }
   if(kind==='tts-language'){room.tts.lang=value;return panelUpdate(interaction,client,room,'tts');}
   if(kind==='member'||kind==='access-user'||kind==='access-role'){
-    selections.set(selectionKey(interaction,kind),value);
+    rememberSelection(interaction,kind,value);
     return panelNotice(interaction,kind==='member'?'Selected <@'+value+'>.':'Selected '+(kind==='access-role'?'<@&'+value+'>':'<@'+value+'>')+'.');
   }
   return panelNotice(interaction,'Unknown panel selection.');
