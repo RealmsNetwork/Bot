@@ -71,7 +71,7 @@ const listeners=[
   if(oldState.channelId&&tempRooms.has(oldState.channelId)){
     const room=tempRooms.get(oldState.channelId);
     if(room&&room.ownerId===oldState.member?.id&&newState.channelId!==oldState.channelId&&c.autoTransferOnOwnerLeave!==false&&oldState.channel?.members?.size>0){
-      const next=[...oldState.channel.members.values()].sort((a,b)=>(a.joinedTimestamp||0)-(b.joinedTimestamp||0))[0];
+      const next=[...oldState.channel.members.values()].filter(member=>member.id!==oldState.member?.id&&!member.user.bot&&!room.bannedUsers?.has(member.id)).sort((a,b)=>(a.joinedTimestamp||0)-(b.joinedTimestamp||0))[0];
       if(next){
         room.ownerId=next.id;
         room.accessUsers?.add(next.id);
