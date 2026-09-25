@@ -58,6 +58,11 @@ function normalizeRoom(room) {
   room.accessUsers = room.accessUsers instanceof Set ? room.accessUsers : new Set(room.accessUsers || []);
   room.accessRoles = room.accessRoles instanceof Set ? room.accessRoles : new Set(room.accessRoles || []);
   room.accessUsers.add(room.ownerId);
+  room.controlUsers = room.controlUsers instanceof Set ? room.controlUsers : new Set(room.controlUsers || []);
+  room.controlRoles = room.controlRoles instanceof Set ? room.controlRoles : new Set(room.controlRoles || []);
+  room.controlUsers.add(room.ownerId);
+  room.bannedUsers = room.bannedUsers instanceof Set ? room.bannedUsers : new Set(room.bannedUsers || []);
+  room.tts = room.tts && typeof room.tts === 'object' ? room.tts : {};
   room.page = room.page || 'overview';
   if (!room.panelMessageId) room.panelMessageId = null;
 }
@@ -81,8 +86,12 @@ function canAccess(interaction, room) {
 }
 
 function canControl(interaction, room, client) {
+  normalizeRoom(room);
   if (room.ownerId === interaction.user.id) return true;
-  return tempCfg(client).ownerOnlyControl === false;
+  const c = tempCfg(client);
+  if (c.ownerOnlyControl !== false) return false;
+  if (room.controlUsers.has(interaction.user.id)) return true;
+  return interaction.member?.roles?.cache ? [...room.controlRoles].some(id => interaction.member.roles.cache.has(id)) : false;
 }
 
 function pageMenu(page) {
@@ -92,10 +101,11 @@ function pageMenu(page) {
       .setPlaceholder('Navigate panel...')
       .addOptions(
         { label: 'Overview', value: 'overview', description: 'Room status and quick actions', default: page === 'overview' },
-        { label: 'Room Settings', value: 'room', description: 'Lock, visibility, name, limit and bitrate', default: page === 'room' },
+        { label: 'Room Settings', value: 'room', description: 'Lock, visibility, name, limit, bitrate and region', default: page === 'room' },
+        { label: 'Audio & TTS', value: 'audio', description: 'Room-specific TTS voice, rate, volume and controls', default: page === 'audio' },
         { label: 'Access', value: 'access', description: 'Choose users and roles for panel access', default: page === 'access' },
-        { label: 'Members', value: 'members', description: 'Moderate members in the voice room', default: page === 'members' },
-        { label: 'Danger Zone', value: 'danger', description: 'Ownership, reset and deletion', default: page === 'danger' }
+        { label: 'Members', value: 'members', description: 'Kick, mute, deafen, ban and transfer members', default: page === 'members' },
+        { label: 'Danger Zone', value: 'danger', description: 'Ownership, access reset and deletion', default: page === 'danger' }
       )
   );
 }
@@ -118,7 +128,8 @@ function statusText(room, voice) {
     '**Locked:** ' + (room.locked ? 'Yes' : 'No'),
     '**Hidden:** ' + (room.hidden ? 'Yes' : 'No'),
     '**Panel users:** ' + room.accessUsers.size,
-    '**Panel roles:** ' + room.accessRoles.size
+    '**Panel roles:** ' + room.accessRoles.size,
+    '**VC bans:** ' + room.bannedUsers.size
   ].join('\n');
 }
 
@@ -150,6 +161,34 @@ function buildPayload(client, room) {
       '',
       'Buttons below apply immediately. Rename, limit and bitrate open a form.'
     ].join('\n');
+  } else if (page === 'audio') {
+    const base = cfg(client).tts || {};
+    const t = { ...base, ...(room.tts || {}) };
+    description = [
+      '### Audio & TTS',
+      '**TTS:** ' + (t.enabled === false ? 'Disabled' : 'Enabled'),
+      '**Voice:** ' + (t.voice || t.defaultVoice || base.defaultVoice || 'default'),
+      '**Language:** ' + (t.language || t.defaultLanguage || base.defaultLanguage || 'default'),
+      '**Rate:** ' + (t.rate ?? t.maxRate ?? base.maxRate ?? 100) + '%',
+      '**Volume:** ' + (t.volume ?? t.maxVolume ?? base.maxVolume ?? 100) + '%',
+      '',
+      'These settings override the module defaults for this temporary room only.'
+    ].join('\\n');
+  } else if (page === 'audio') {
+    rows.push(
+      new ActionRowBuilder().addComponents(
+        button('tts-toggle', 'Toggle TTS', room.tts.enabled === false ? ButtonStyle.Success : ButtonStyle.Secondary, c.panelAllowTtsControl === false),
+        button('tts-voice', 'Voice', ButtonStyle.Primary, c.panelAllowTtsControl === false),
+        button('tts-language', 'Language', ButtonStyle.Primary, c.panelAllowTtsControl === false),
+        button('tts-rate', 'Rate', ButtonStyle.Primary, c.panelAllowTtsControl === false),
+        button('tts-volume', 'Volume', ButtonStyle.Primary, c.panelAllowTtsControl === false)
+      ),
+      new ActionRowBuilder().addComponents(
+        button('tts-reset', 'Reset TTS Defaults', ButtonStyle.Secondary, c.panelAllowTtsControl === false),
+        button('tts-test', 'Test TTS', ButtonStyle.Success, c.panelAllowTtsControl === false),
+        button('refresh', 'Refresh', ButtonStyle.Secondary)
+      )
+    );
   } else if (page === 'access') {
     const users = [...room.accessUsers].map(id => '<@' + id + '>').join(', ') || 'None';
     const roles = [...room.accessRoles].map(id => '<@&' + id + '>').join(', ') || 'None';
@@ -166,6 +205,7 @@ function buildPayload(client, room) {
     ].join('\n');
   } else if (page === 'members') {
     const members = voice?.members ? [...voice.members.values()].map(m => '<@' + m.id + '>').join(', ') : '';
+    const banned = [...room.bannedUsers].map(id => '<@' + id + '>').join(', ') || 'None';
     description = [
       '### Room Members',
       members || 'Nobody is currently connected.',
@@ -201,6 +241,7 @@ function buildPayload(client, room) {
         button('bitrate', 'Set Bitrate', ButtonStyle.Primary, c.allowOwnerBitrate === false),
         button('members', 'Members', ButtonStyle.Secondary),
         button('access', 'Access', ButtonStyle.Secondary),
+        button('audio', 'TTS', ButtonStyle.Secondary, tempCfg(client).panelAllowTtsControl === false),
         button('danger', 'Danger Zone', ButtonStyle.Danger)
       )
     );
@@ -216,7 +257,12 @@ function buildPayload(client, room) {
       new ActionRowBuilder().addComponents(
         button('limit', 'User Limit', ButtonStyle.Primary, c.allowOwnerLimit === false),
         button('bitrate', 'Bitrate', ButtonStyle.Primary, c.allowOwnerBitrate === false),
-        button('reset', 'Reset Room', ButtonStyle.Secondary),
+        button('region', 'Voice Region', ButtonStyle.Secondary),
+        button('nsfw', 'NSFW', ButtonStyle.Secondary),
+        button('reset', 'Reset Room', ButtonStyle.Secondary)
+      ),
+      new ActionRowBuilder().addComponents(
+        button('audio', 'Audio & TTS', ButtonStyle.Primary, c.panelAllowTtsControl === false),
         button('refresh', 'Refresh', ButtonStyle.Secondary)
       )
     );
@@ -255,13 +301,15 @@ function buildPayload(client, room) {
           .setMaxValues(1)
       ),
       new ActionRowBuilder().addComponents(
-        button('kick', 'Kick', ButtonStyle.Danger),
-        button('mute', 'Mute', ButtonStyle.Secondary),
-        button('unmute', 'Unmute', ButtonStyle.Success),
-        button('deafen', 'Deafen', ButtonStyle.Secondary),
-        button('undeafen', 'Undeafen', ButtonStyle.Success)
+        button('kick', 'Kick', ButtonStyle.Danger, c.allowOwnerKick === false),
+        button('ban', 'Ban from VC', ButtonStyle.Danger, c.allowOwnerBan === false),
+        button('unban', 'Unban from VC', ButtonStyle.Success, c.allowOwnerBan === false),
+        button('mute', 'Mute', ButtonStyle.Secondary, c.allowOwnerMute === false),
+        button('unmute', 'Unmute', ButtonStyle.Success, c.allowOwnerMute === false)
       ),
       new ActionRowBuilder().addComponents(
+        button('deafen', 'Deafen', ButtonStyle.Secondary, c.allowOwnerDeafen === false),
+        button('undeafen', 'Undeafen', ButtonStyle.Success, c.allowOwnerDeafen === false),
         button('transfer-selected', 'Transfer Owner', ButtonStyle.Success, c.allowOwnerTransfer === false),
         button('panel-selected', 'Grant Panel', ButtonStyle.Primary),
         button('refresh', 'Refresh', ButtonStyle.Secondary)
@@ -439,6 +487,26 @@ async function showForm(interaction, kind) {
     title = 'Set Voice Bitrate';
     label = 'Bitrate in kbps';
     placeholder = '8-384';
+  } else if (kind === 'region') {
+    title = 'Set Voice Region';
+    label = 'Region or auto';
+    placeholder = 'auto, us-east, europe, japan...';
+  } else if (kind === 'tts-voice') {
+    title = 'Set TTS Voice';
+    label = 'Voice name';
+    placeholder = 'en-US-AriaNeural';
+  } else if (kind === 'tts-language') {
+    title = 'Set TTS Language';
+    label = 'Language code';
+    placeholder = 'en-US';
+  } else if (kind === 'tts-rate') {
+    title = 'Set TTS Rate';
+    label = 'Rate percent';
+    placeholder = '0-100';
+  } else if (kind === 'tts-volume') {
+    title = 'Set TTS Volume';
+    label = 'Volume percent';
+    placeholder = '0-100';
   }
 
   const modal = new ModalBuilder()
@@ -451,7 +519,7 @@ async function showForm(interaction, kind) {
           .setLabel(label)
           .setStyle(TextInputStyle.Short)
           .setRequired(true)
-          .setMaxLength(kind === 'rename' ? 100 : 4)
+          .setMaxLength(kind === 'rename' ? 100 : kind.startsWith('tts-voice') ? 80 : 32)
           .setPlaceholder(placeholder)
       )
     );
@@ -467,7 +535,7 @@ async function handleButton(interaction, client, rooms) {
   normalizeRoom(room);
 
   const action = interaction.customId.slice('rn-tvc:'.length);
-  if (['refresh', 'members', 'access', 'danger', 'overview', 'room'].includes(action)) {
+  if (['refresh', 'members', 'access', 'danger', 'overview', 'room', 'audio'].includes(action)) {
     room.page = action === 'refresh' ? room.page : action;
     return interaction.update(buildPayload(client, room));
   }
@@ -500,10 +568,11 @@ async function handleButton(interaction, client, rooms) {
 
   const c = tempCfg(client);
   const userId = selected(interaction, 'member');
+  const bannedId = selected(interaction, 'member');
   const accessUser = selected(interaction, 'access-user');
   const accessRole = selected(interaction, 'access-role');
 
-  if (['rename', 'limit', 'bitrate'].includes(action)) return showForm(interaction, action);
+  if (['rename', 'limit', 'bitrate', 'region'].includes(action)) return showForm(interaction, action);
 
   if (action === 'lock') {
     room.locked = true;
@@ -517,6 +586,10 @@ async function handleButton(interaction, client, rooms) {
   } else if (action === 'unhide') {
     room.hidden = false;
     await voice.permissionOverwrites.edit(guild.roles.everyone, { ViewChannel: true });
+  } else if (action === 'region') {
+    return showForm(interaction, 'region');
+  } else if (action === 'nsfw') {
+    await voice.setNSFW(!voice.nsfw, 'Temporary VC owner toggled NSFW');
   } else if (action === 'reset') {
     room.locked = false;
     room.hidden = false;
@@ -534,6 +607,24 @@ async function handleButton(interaction, client, rooms) {
   } else if (action === 'revoke-role') {
     if (!accessRole) return interaction.reply({ content: 'Select a role first.', ephemeral: true });
     await revoke(room, guild, accessRole, 'role', client);
+  } else if (action === 'ban' || action === 'unban') {
+    const target = userId && guild.members.cache.get(userId);
+    if (!target || target.id === interaction.user.id) return interaction.reply({ content: 'Select another member.', ephemeral: true });
+    if (action === 'ban') {
+      room.bannedUsers.add(target.id);
+      room.accessUsers.delete(target.id);
+      room.controlUsers?.delete(target.id);
+      await voice.permissionOverwrites.edit(target.id, {
+        Connect: false,
+        ViewChannel: false,
+        Speak: false
+      });
+      await target.voice.disconnect('Banned from temporary voice room').catch(() => {});
+    } else {
+      room.bannedUsers.delete(target.id);
+      const allow = { Connect: !room.locked, ViewChannel: !room.hidden, Speak: true };
+      await voice.permissionOverwrites.edit(target.id, allow).catch(() => {});
+    }
   } else if (action === 'kick') {
     const target = userId && voice.members.get(userId);
     if (!target || target.id === interaction.user.id) return interaction.reply({ content: 'Select another member in the room.', ephemeral: true });
@@ -561,6 +652,18 @@ async function handleButton(interaction, client, rooms) {
   } else if (action === 'panel-selected') {
     if (!userId) return interaction.reply({ content: 'Select a member first.', ephemeral: true });
     await grant(room, guild, userId, 'user', client);
+  } else if (action === 'tts-toggle') {
+    if (c.panelAllowTtsControl === false) return interaction.reply({ content: 'Room TTS controls are disabled.', ephemeral: true });
+    room.tts = { ...(cfg(client).tts || {}), ...(room.tts || {}), enabled: room.tts.enabled === false };
+  } else if (['tts-voice', 'tts-language', 'tts-rate', 'tts-volume'].includes(action)) {
+    if (c.panelAllowTtsControl === false) return interaction.reply({ content: 'Room TTS controls are disabled.', ephemeral: true });
+    return showForm(interaction, action);
+  } else if (action === 'tts-reset') {
+    if (c.panelAllowTtsControl === false) return interaction.reply({ content: 'Room TTS controls are disabled.', ephemeral: true });
+    room.tts = {};
+  } else if (action === 'tts-test') {
+    if (c.panelAllowTtsControl === false) return interaction.reply({ content: 'Room TTS controls are disabled.', ephemeral: true });
+    return interaction.reply({ content: 'Use `/tts <text>` while you are in this room to test the current room TTS settings.', ephemeral: true });
   } else if (action === 'reset-access') {
     const panel = guild.channels.cache.get(room.panelChannelId);
     for (const id of room.accessUsers) if (id !== room.ownerId) await panel?.permissionOverwrites.delete(id).catch(() => {});
@@ -661,11 +764,19 @@ async function handleModal(interaction, client, rooms) {
       const max = Math.min(Number(tempCfg(client).maxBitrate) || 384000, 384000) / 1000;
       if (!Number.isInteger(kbps) || kbps < 8 || kbps > max) throw new Error('Bitrate must be 8-' + max + ' kbps.');
       await voice.setBitrate(kbps * 1000);
+    } else if (kind === 'region') {
+      await voice.setRTCRegion(value.toLowerCase() === 'auto' || !value ? null : value.toLowerCase());
+    } else if (kind.startsWith('tts-')) {
+      room.tts = { ...(cfg(client).tts || {}), ...(room.tts || {}) };
+      if (kind === 'tts-voice') room.tts.voice = value;
+      if (kind === 'tts-language') room.tts.language = value;
+      if (kind === 'tts-rate') { const n = Number(value); if (!Number.isFinite(n) || n < 0 || n > 100) throw new Error('Rate must be 0-100.'); room.tts.rate = n; }
+      if (kind === 'tts-volume') { const n = Number(value); if (!Number.isFinite(n) || n < 0 || n > 100) throw new Error('Volume must be 0-100.'); room.tts.volume = n; }
     } else {
       throw new Error('Unknown panel form.');
     }
 
-    room.page = 'room';
+    room.page = kind.startsWith('tts-') ? 'audio' : 'room';
     await interaction.reply({ content: 'Room updated.', ephemeral: true });
     await refresh(client, room, room.page);
   } catch (e) {
@@ -708,6 +819,10 @@ async function recover(client, rooms) {
         hidden: !!voice.permissionOverwrites.cache.get(guild.roles.everyone.id)?.deny.has(PermissionFlagsBits.ViewChannel),
         accessUsers: new Set([owner]),
         accessRoles: new Set(),
+        controlUsers: new Set([owner]),
+        controlRoles: new Set(),
+        bannedUsers: new Set(),
+        tts: {},
         page: 'overview'
       };
 
@@ -715,6 +830,10 @@ async function recover(client, rooms) {
         if (id === guild.roles.everyone.id || id === guild.members.me?.id) continue;
         if (overwrite.type === 0) room.accessRoles.add(id);
         if (overwrite.type === 1 && guild.members.cache.has(id)) room.accessUsers.add(id);
+      }
+      for (const [id, overwrite] of voice.permissionOverwrites.cache) {
+        if (id === guild.roles.everyone.id || id === owner || overwrite.type !== 1) continue;
+        if (overwrite.deny.has(PermissionFlagsBits.Connect) && !overwrite.allow.has(PermissionFlagsBits.Connect)) room.bannedUsers.add(id);
       }
 
       rooms.set(voice.id, room);
