@@ -340,19 +340,19 @@ function button(id, label, style = ButtonStyle.Secondary, disabled = false) {
 
 function status(room, voice) {
   return [
-    '**Voice:** ' + (voice ? '<#' + voice.id + '>' : 'missing'),
+    '**Room:** ' + (voice ? '<#' + voice.id + '>' : 'missing'),
     '**Owner:** <@' + room.ownerId + '>',
-    '**Bot:** ' + (voice?.guild?.members?.me?.voice?.channelId === room.voiceChannelId ? 'In VC' : 'Not in VC'),
+    '**Bot:** ' + (voice?.guild?.members?.me?.voice?.channelId === room.voiceChannelId ? 'Here' : 'Not here'),
     '**Members:** ' + (voice?.members?.size || 0) + '/' + (voice?.userLimit || '∞'),
-    '**Bitrate:** ' + (voice ? Math.round(voice.bitrate / 1000) + ' kbps' : 'unknown'),
-    '**Region:** ' + (voice?.rtcRegion || 'Automatic'),
-    '**Video quality:** ' + (voice?.videoQualityMode || 'Auto'),
-    '**Chat slowmode:** ' + (voice?.rateLimitPerUser || 0) + 's',
+    '**Quality:** ' + (voice ? Math.round(voice.bitrate / 1000) + ' kbps' : 'Unknown'),
+    '**Region:** ' + (voice?.rtcRegion || 'Auto'),
+    '**Video:** ' + (voice?.videoQualityMode || 'Auto'),
+    '**Chat delay:** ' + (voice?.rateLimitPerUser || 0) + 's',
     '**Locked:** ' + (room.locked ? 'Yes' : 'No'),
     '**Hidden:** ' + (room.hidden ? 'Yes' : 'No'),
-    '**VC bans:** ' + room.bannedUsers.size,
-    '**Panel users:** ' + Math.max(0, room.accessUsers.size - 1),
-    '**Panel roles:** ' + room.accessRoles.size
+    '**Banned:** ' + room.bannedUsers.size,
+    '**People:** ' + Math.max(0, room.accessUsers.size - 1),
+    '**Roles:** ' + room.accessRoles.size
   ].join('\n');
 }
 
@@ -387,7 +387,7 @@ function buildPayload(client, room, extras = {}) {
       ),
       new ActionRowBuilder().addComponents(
         button('invite','Invite',ButtonStyle.Success),
-        button('sync-perms','Sync Permissions'),
+        button('sync-perms','Update Permissions'),
         button('utilities','Utilities'),
         button('danger','Danger Zone',ButtonStyle.Danger)
       )
@@ -490,23 +490,23 @@ function buildPayload(client, room, extras = {}) {
       '### Text To Speech',
       '**Enabled:** ' + (s.enabled ? 'Yes' : 'No'),
       '**Auto TTS:** ' + (s.autoTts ? 'Enabled' : 'Disabled'),
-      '**Provider:** ' + s.provider,
+      '**Type:** ' + s.provider,
       '**Language:** ' + s.lang,
       '**Voice:** ' + s.voice,
       '**Rate:** ' + s.rate + '%',
       '**Volume:** ' + s.volume + '%',
-      '**Name prefix:** ' + (s.prefixName ? 'Enabled' : 'Disabled'),
+      '**Say name:** ' + (s.prefixName ? 'Yes' : 'No'),
       ''
     ].join('\n');
     rows.push(
       new ActionRowBuilder().addComponents(
         new StringSelectMenuBuilder()
           .setCustomId('rn-tvc:tts-provider')
-          .setPlaceholder('Choose TTS provider')
+          .setPlaceholder('Choose voice type')
           .addOptions(
-            { label:'Microsoft Edge', value:'edge', description:'Natural neural voices', default:s.provider === 'edge' },
-            { label:'Google', value:'google', description:'Google Translate TTS', default:s.provider === 'google' },
-            { label:'StreamElements / Polly', value:'polly', description:'Polly-compatible endpoint', default:s.provider === 'polly' }
+            { label:'Natural', value:'edge', description:'Natural voice', default:s.provider === 'edge' },
+            { label:'Classic', value:'google', description:'Clear voice', default:s.provider === 'google' },
+            { label:'Alternate', value:'polly', description:'Alternate voice', default:s.provider === 'polly' }
           )
       ),
       new ActionRowBuilder().addComponents(
@@ -579,16 +579,16 @@ function buildPayload(client, room, extras = {}) {
       '### Permissions',
       '**People with access:** ' + Math.max(0,room.accessUsers.size-1),
       '**Roles with access:** ' + room.accessRoles.size,
-      '**Room access:** ' + (room.syncPermissions !== false ? 'Synced' : 'Separate'),
-      '**Shared controls:** ' + (room.operatorControls !== false ? 'Enabled' : 'Disabled'),
+      '**Access:** ' + (room.syncPermissions !== false ? 'Shared' : 'Separate'),
+      '**Helpers:** ' + (room.operatorControls !== false ? 'Allowed' : 'Off'),
       '',
-      'Owner-only actions stay protected.'
+      'Room owner always keeps full access.'
     ].join('\n');
     rows.push(new ActionRowBuilder().addComponents(
       button('sync-perms','Update Permissions',ButtonStyle.Primary),
-      button('toggle-sync',room.syncPermissions === false ? 'Enable Sync' : 'Disable Sync'),
-      button('toggle-operators',room.operatorControls === false ? 'Enable Operators' : 'Disable Operators'),
-      button('access','Manage Access'),
+      button('toggle-sync',room.syncPermissions === false ? 'Use Separate Access' : 'Share Access'),
+      button('toggle-operators',room.operatorControls === false ? 'Allow Helpers' : 'Limit Helpers'),
+      button('access','Who Can Use It'),
       button('refresh','Refresh')
     ));
   } else if (page === 'utilities') {
@@ -596,9 +596,9 @@ function buildPayload(client, room, extras = {}) {
     rows.push(
       new ActionRowBuilder().addComponents(
         button('refresh','Refresh'),
-        button('rebuild','Refresh Panel',ButtonStyle.Primary),
+        button('refresh','Refresh'),
         button('invite','Create Invite',ButtonStyle.Success),
-        button('sync-perms','Sync Permissions'),
+        button('sync-perms','Update Permissions'),
         button('tts-stop','Stop TTS',ButtonStyle.Danger)
       ),
       new ActionRowBuilder().addComponents(
