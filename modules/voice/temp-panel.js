@@ -35,6 +35,7 @@ function roomSnapshot(room) {
     hidden: !!room.hidden,
     operatorControls: room.operatorControls !== false,
     syncPermissions: room.syncPermissions !== false,
+    emptySince: Number.isFinite(Number(room.emptySince)) ? Number(room.emptySince) : null,
     tts: {
       provider: room.tts?.provider,
       voice: room.tts?.voice,
@@ -64,6 +65,16 @@ async function persistRoom(client, room) {
 async function deletePersistedRoom(client, room) {
   if (!client?.db?.delete || !room?.guildId || !room?.voiceChannelId) return;
   await client.db.delete(room.guildId, stateKey(room)).catch(e => console.error('[TempVC] Failed to delete room state:', e?.message || e));
+}
+
+function emptyGraceMs(client) {
+  const seconds = Number(tc(client).emptyRoomGraceSeconds);
+  return (Number.isFinite(seconds) ? Math.max(0, Math.min(86400, seconds)) : 300) * 1000;
+}
+
+function recoveryGraceMs(client) {
+  const seconds = Number(tc(client).recoveryGraceSeconds);
+  return (Number.isFinite(seconds) ? Math.max(0, Math.min(86400, seconds)) : 600) * 1000;
 }
 
 function brand(client) {
@@ -1141,4 +1152,4 @@ function destroy(){
   selections.clear();
 }
 
-module.exports={create,refresh,deleteRoom,initialize,destroy,recover,cleanup,handle,panelSlug,syncPermissions,normalizeRoom,channelUpdate};
+module.exports={create,refresh,deleteRoom,initialize,destroy,recover,cleanup,handle,panelSlug,syncPermissions,normalizeRoom,channelUpdate,persistRoom};
