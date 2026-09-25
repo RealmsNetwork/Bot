@@ -536,6 +536,7 @@ async function getMember(interaction){
 }
 
 async function panelUpdate(interaction,client,room,page){
+  if(!interaction.deferred&&!interaction.replied)await interaction.deferUpdate().catch(e=>console.error('[TempVC/Panel] deferUpdate:',e?.message||e));
   const msg=await refresh(client,room,page);
   if(!msg)return interaction.editReply({content:'The temporary VC panel is no longer available.',embeds:[],components:[]}).catch(()=>{});
   const payload={
@@ -579,9 +580,9 @@ async function handleButton(interaction,client,rooms){
   const guild=interaction.guild;
   const voice=guild.channels.cache.get(room.voiceChannelId);
   const c=tc(client);
-  const member=await getMember(interaction);
 
   if(['rename','limit','bitrate','region','slowmode','rate','volume','speak','tts-voice-manual'].includes(action))return showForm(interaction,action);
+  const member=await getMember(interaction);
   if(!voice&&action!=='delete')return interaction.reply({content:'The voice room no longer exists.',ephemeral:true});
 
   if(action==='lock'){room.locked=true;await voice.permissionOverwrites.edit(guild.roles.everyone,{Connect:false});}
