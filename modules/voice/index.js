@@ -15,26 +15,32 @@ function session(guildId){if(!sessions.has(guildId))sessions.set(guildId,{connec
 async function connect(member,client){
   if(!member?.voice?.channel)return null;
   const s=session(member.guild.id);
-  if(s.connection?.state?.status===VoiceConnectionStatus.Destroyed)s.connection=null;
-  if(s.connection?.joinConfig?.channelId===member.voice.channel.id)return s;
-  if(s.connection){
-    const previous=s.connection;
-    const ttsRoom=[...tempRooms.values()].find(r=>r.ttsConnection===previous);
-    if(ttsRoom)await tts.stop(ttsRoom,client).catch(e=>console.error('[Voice/TTS] Failed to stop TTS before channel switch:',e?.message||e));
-    previous.destroy();
-    s.connection=null;
-  }
-  const connection=joinVoiceChannel({channelId:member.voice.channel.id,guildId:member.guild.id,adapterCreator:member.guild.voiceAdapterCreator,selfDeaf:true});
-  s.connection=connection;
-  connection.subscribe(s.player);
-  try{
-    await entersState(connection,VoiceConnectionStatus.Ready,15000);
-  }catch(e){
-    if(s.connection===connection)s.connection=null;
-    connection.destroy();
-    throw e;
-  }
-  return s;
+  if(s.connectionPromise)return s.connectionPromise;
+  const work=(async()=>{
+    if(s.connection?.state?.status===VoiceConnectionStatus.Destroyed)s.connection=null;
+    if(s.connection?.joinConfig?.channelId===member.voice.channel.id)return s;
+    if(s.connection){
+      const previous=s.connection;
+      const ttsRoom=[...tempRooms.values()].find(r=>r.ttsConnection===previous);
+      if(ttsRoom)await tts.stop(ttsRoom,client).catch(e=>console.error('[Voice/TTS] Failed to stop TTS before channel switch:',e?.message||e));
+      previous.destroy();
+      s.connection=null;
+    }
+    const connection=joinVoiceChannel({channelId:member.voice.channel.id,guildId:member.guild.id,adapterCreator:member.guild.voiceAdapterCreator,selfDeaf:true});
+    s.connection=connection;
+    connection.subscribe(s.player);
+    try{
+      await entersState(connection,VoiceConnectionStatus.Ready,15000);
+    }catch(e){
+      if(s.connection===connection)s.connection=null;
+      connection.destroy();
+      throw e;
+    }
+    return s;
+  })();
+  s.connectionPromise=work;
+  try{return await work;}
+  finally{if(s.connectionPromise===work)s.connectionPromise=null;}
 }
 async function playNext(guildId,client){const s=sessions.get(guildId);if(!s||!s.queue.length){if(s)s.current=null;return;}const track=s.queue.shift();s.current=track;try{const stream=await play.stream(track.url,{quality:2,discordPlayerCompatibility:false});const resource=createAudioResource(stream.stream,{inputType:stream.type,inlineVolume:true});resource.volume?.setVolume(Math.max(0,Math.min(1.5,s.volume/100)));s.player.play(resource);if(s.textChannelId){const ch=client.channels.cache.get(s.textChannelId);if(ch?.isTextBased()&&cfg(client).music.announceNowPlaying)await ch.send({embeds:[embed(client,'Now Playing',`**${track.title}**\n${track.url}`)]}).catch(()=>{});}}catch(e){console.error('[Voice/Music]',e.message);s.current=null;await playNext(guildId,client);}}
 function ensurePlayerHooks(guildId,client){const s=session(guildId);if(s._hooks)return;s._hooks=true;s.player.on(AudioPlayerStatus.Idle,()=>playNext(guildId,client).catch(e=>console.error('[Voice/Music]',e)));s.player.on('error',e=>{console.error('[Voice/Music]',e.message);playNext(guildId,client).catch(()=>{});});}
