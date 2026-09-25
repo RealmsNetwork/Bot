@@ -574,7 +574,7 @@ async function create(client,member,voice,room){
 async function deleteRoom(client,rooms,room,guild,reason='Temporary voice room deleted'){
   if(!room)return;
   rooms.delete(room.voiceChannelId);
-  tts.stop(room,client);
+  await tts.stop(room,client);
   room.ttsConnection?.destroy?.();
   const panel=room.panelChannelId&&guild.channels.cache.get(room.panelChannelId);
   const voice=guild.channels.cache.get(room.voiceChannelId);
