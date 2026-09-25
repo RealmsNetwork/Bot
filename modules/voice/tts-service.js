@@ -116,7 +116,7 @@ function ensurePlayer(room,client) {
   room.ttsPlaying = false;
   room.ttsPlayer.on(AudioPlayerStatus.Idle, () => {
     room.ttsPlaying = false;
-    playNext(room).catch(e => console.error('[TempVC/TTS]', e?.stack || e));
+    playNext(room,client).catch(e => console.error('[TempVC/TTS]', e?.stack || e));
   });
   room.ttsPlayer.on('error', e => {
     console.error('[TempVC/TTS] Player:', e?.message || e);
@@ -198,7 +198,7 @@ async function playNext(room,client) {
     console.error('[TempVC/TTS] Synthesis:', e?.stack || e?.message || e);
     room.ttsQueue.shift();
     room.ttsPlaying = false;
-    await playNext(room);
+    await playNext(room,client);
     return;
   }
   room.ttsQueue.shift();
