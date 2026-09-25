@@ -705,8 +705,8 @@ async function grant(room,guild,id,type,client){
   }catch(e){
     if(!hadAccess){
       targetSet.delete(id);
-      await panel?.permissionOverwrites.edit(id,permissionPatch(panelBefore,[['ViewChannel',PermissionFlagsBits.ViewChannel],['ReadMessageHistory',PermissionFlagsBits.ReadMessageHistory],['SendMessages',PermissionFlagsBits.SendMessages])).catch(()=>{});
-      if(room.syncPermissions!==false)await voice?.permissionOverwrites.edit(id,permissionPatch(voiceBefore,[['ViewChannel',PermissionFlagsBits.ViewChannel],['Connect',PermissionFlagsBits.Connect],['Speak',PermissionFlagsBits.Speak])).catch(()=>{});
+      await panel?.permissionOverwrites.edit(id,permissionPatch(panelBefore,[['ViewChannel',PermissionFlagsBits.ViewChannel],['ReadMessageHistory',PermissionFlagsBits.ReadMessageHistory],['SendMessages',PermissionFlagsBits.SendMessages]])).catch(()=>{});
+      if(room.syncPermissions!==false)await voice?.permissionOverwrites.edit(id,permissionPatch(voiceBefore,[['ViewChannel',PermissionFlagsBits.ViewChannel],['Connect',PermissionFlagsBits.Connect],['Speak',PermissionFlagsBits.Speak]])).catch(()=>{});
     }
     throw e;
   }
