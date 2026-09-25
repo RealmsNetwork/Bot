@@ -725,7 +725,18 @@ async function handleButton(interaction,client,rooms){
   else if(action==='unlock'){await voice.permissionOverwrites.edit(guild.roles.everyone,{Connect:true});room.locked=false;}
   else if(action==='hide'){await voice.permissionOverwrites.edit(guild.roles.everyone,{ViewChannel:false});room.hidden=true;}
   else if(action==='unhide'){await voice.permissionOverwrites.edit(guild.roles.everyone,{ViewChannel:true});room.hidden=false;}
-  else if(action==='reset-room'){await voice.permissionOverwrites.edit(guild.roles.everyone,{Connect:true,ViewChannel:true});await voice.setUserLimit(0);await voice.setBitrate(Math.min(64000,Number(c.maxBitrate)||384000));room.locked=false;room.hidden=false;}
+  else if(action==='reset-room'){
+    const defaultLocked=c.defaultLocked===true;
+    const defaultHidden=c.defaultHidden===true;
+    await voice.permissionOverwrites.edit(guild.roles.everyone,{Connect:defaultLocked?false:true,ViewChannel:defaultHidden?false:true});
+    const configuredLimit=Number(c.userLimit);
+    await voice.setUserLimit(Number.isInteger(configuredLimit)?Math.max(0,Math.min(99,configuredLimit)):0);
+    const configuredBitrate=Number(c.bitrate);
+    const maxBitrate=Math.max(8000,Math.min(384000,Number(c.maxBitrate)||384000));
+    await voice.setBitrate(configuredBitrate>0?Math.min(configuredBitrate,maxBitrate):Math.min(64000,maxBitrate));
+    room.locked=defaultLocked;
+    room.hidden=defaultHidden;
+  }
   else if(action==='quality'){
     const cur=String(voice.videoQualityMode||'auto').toLowerCase();
     const next=cur==='auto'?'full':'auto';
@@ -988,6 +999,8 @@ async function channelUpdate(oldChannel,newChannel,client,rooms){
       if(panel){
         const desired=panelSlug(client,newChannel.name);
         if(panel.name!==desired)await panel.setName(desired,'Temporary VC room renamed').catch(()=>{});
+        const topic='RealmsNetwork temporary VC panel | owner='+room.ownerId+' | voice='+newChannel.id;
+        if(panel.topic!==topic)await panel.setTopic(topic,'Synchronize temporary VC recovery metadata').catch(()=>{});
       }
     }
     await refresh(client,room,room.page||'overview');
