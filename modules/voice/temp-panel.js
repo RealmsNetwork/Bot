@@ -510,7 +510,7 @@ function buildPayload(client, room, extras = {}) {
           )
       ),
       new ActionRowBuilder().addComponents(
-        button('join','Join VC',ButtonStyle.Success),
+        button('join',voice?.guild?.members?.me?.voice?.channelId === room.voiceChannelId ? 'In VC' : 'Join VC',ButtonStyle.Success,voice?.guild?.members?.me?.voice?.channelId === room.voiceChannelId),
         button(s.enabled ? 'tts-disable' : 'tts-enable',s.enabled ? 'Disable TTS' : 'Enable TTS',s.enabled ? ButtonStyle.Danger : ButtonStyle.Success),
         button(s.autoTts ? 'autotts-disable' : 'autotts-enable',s.autoTts ? 'Disable AutoTTS' : 'Enable AutoTTS',s.autoTts ? ButtonStyle.Danger : ButtonStyle.Success),
         button(s.prefixName ? 'prefix-disable' : 'prefix-enable',s.prefixName ? 'No Name Prefix' : 'Add Name Prefix'),
