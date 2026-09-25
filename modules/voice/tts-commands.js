@@ -1,4 +1,4 @@
-const {SlashCommandBuilder,EmbedBuilder,ActionRowBuilder,ButtonBuilder,ButtonStyle,StringSelectMenuBuilder}=require('discord.js');
+const {SlashCommandBuilder,EmbedBuilder,ActionRowBuilder,ButtonBuilder,ButtonStyle,StringSelectMenuBuilder,MessageFlags}=require('discord.js');
 const tts=require('./tts-service');
 
 function roomFor(i){
@@ -16,7 +16,7 @@ function runtimeRoom(i){
 }
 
 async function speak(i,provider,text,extra={}){
-  if(!i.deferred&&!i.replied)await i.deferReply({ephemeral:true});
+  if(!i.deferred&&!i.replied)await i.deferReply({flags:MessageFlags.Ephemeral});
   const room=runtimeRoom(i);
   if(!room)return i.editReply({content:'Join a voice channel first.'});
   room.tts=tts.settingsFor(room,i.client);
@@ -27,7 +27,8 @@ async function speak(i,provider,text,extra={}){
     await tts.speak(i.client,room,text,i.member);
     return i.editReply({content:'Speaking now.'});
   }catch(e){
-    return i.editReply({content:'TTS failed: '+(e?.message||e)}).catch(()=>{});
+    console.error('[TempVC/TTS] Command:',e?.stack||e);
+    return i.editReply({content:'TTS failed. Please try again in a moment.'}).catch(()=>{});
   }
 }
 
@@ -49,7 +50,7 @@ function languageFilter(list,filter){
 }
 
 async function languageBrowser(i){
-  await i.deferReply({ephemeral:true});
+  await i.deferReply({flags:MessageFlags.Ephemeral});
   let all=[];
   try{all=await tts.listLanguages();}catch(e){return i.editReply('Could not load the language API: '+e.message);}
   let filter='all',page=0;
@@ -74,7 +75,7 @@ async function languageBrowser(i){
   const msg=await i.editReply(render());
   const collector=msg.createMessageComponentCollector({time:120000});
   collector.on('collect',async x=>{
-    if(x.user.id!==i.user.id)return x.reply({content:'Run /ttslangs to browse your own menu.',ephemeral:true});
+    if(x.user.id!==i.user.id)return x.reply({content:'Run /ttslangs to browse your own menu.',flags:MessageFlags.Ephemeral});
     if(x.isStringSelectMenu())filter=x.values[0],page=0;
     else {
       const filtered=languageFilter(all,filter),total=Math.max(1,Math.ceil(filtered.length/per));
@@ -89,7 +90,7 @@ async function languageBrowser(i){
 }
 
 async function voiceBrowser(i){
-  await i.deferReply({ephemeral:true});
+  await i.deferReply({flags:MessageFlags.Ephemeral});
   let all=[];
   try{all=await tts.listVoices();}catch(e){return i.editReply('Could not load the Edge voice API: '+e.message);}
   let page=0;
@@ -104,7 +105,7 @@ async function voiceBrowser(i){
   const msg=await i.editReply(render());
   const collector=msg.createMessageComponentCollector({time:120000});
   collector.on('collect',async x=>{
-    if(x.user.id!==i.user.id)return x.reply({content:'Run /ttsvoices to browse your own menu.',ephemeral:true});
+    if(x.user.id!==i.user.id)return x.reply({content:'Run /ttsvoices to browse your own menu.',flags:MessageFlags.Ephemeral});
     const total=Math.max(1,Math.ceil(all.length/per));
     if(x.customId==='rn-tts-voice-first')page=0;
     if(x.customId==='rn-tts-voice-prev')page=Math.max(0,page-1);
@@ -115,20 +116,20 @@ async function voiceBrowser(i){
   collector.on('end',async()=>{await i.editReply({components:[]}).catch(()=>{});});
 }
 
-async function setLanguage(i){if(!i.deferred&&!i.replied)await i.deferReply({ephemeral:true});const r=runtimeRoom(i);if(!r)return i.editReply({content:'Join a voice channel first.'});const value=i.options.getString('language',true);try{const list=await tts.listLanguages();const match=list.find(x=>x.code.toLowerCase()===value.toLowerCase()||x.name.toLowerCase()===value.toLowerCase());if(!match)return i.editReply({content:'That Google language was not found. Use /ttslangs.'});r.tts=tts.settingsFor(r,i.client);r.tts.provider='google';r.tts.lang=match.code;return i.editReply({content:'Google TTS language set to **'+match.name+'** ('+match.code+').'});}catch(e){return i.editReply({content:'Language lookup failed: '+e.message});}}
+async function setLanguage(i){if(!i.deferred&&!i.replied)await i.deferReply({flags:MessageFlags.Ephemeral});const r=runtimeRoom(i);if(!r)return i.editReply({content:'Join a voice channel first.'});const value=i.options.getString('language',true);try{const list=await tts.listLanguages();const match=list.find(x=>x.code.toLowerCase()===value.toLowerCase()||x.name.toLowerCase()===value.toLowerCase());if(!match)return i.editReply({content:'That Google language was not found. Use /ttslangs.'});r.tts=tts.settingsFor(r,i.client);r.tts.provider='google';r.tts.lang=match.code;return i.editReply({content:'Google TTS language set to **'+match.name+'** ('+match.code+').'});}catch(e){return i.editReply({content:'Language lookup failed: '+e.message});}}
 
 const commands=[
   {data:new SlashCommandBuilder().setName('tts').setDescription('Speak text using the selected TTS provider').addStringOption(o=>o.setName('text').setDescription('Text to speak').setRequired(true)).addStringOption(o=>o.setName('provider').setDescription('TTS provider').addChoices({name:'Microsoft Edge',value:'edge'},{name:'Google',value:'google'},{name:'StreamElements / Polly',value:'polly'})).addStringOption(o=>o.setName('lang').setDescription('Language / locale code')).addStringOption(o=>o.setName('voice').setDescription('Voice name')),execute:async i=>speak(i,i.options.getString('provider')||'edge',i.options.getString('text',true),{lang:i.options.getString('lang'),voice:i.options.getString('voice')})},
   {data:new SlashCommandBuilder().setName('google').setDescription('Play Google TTS in your voice channel').addStringOption(o=>o.setName('text').setDescription('Text').setRequired(true)).addStringOption(o=>o.setName('lang').setDescription('Google language code')),execute:async i=>speak(i,'google',i.options.getString('text',true),{lang:i.options.getString('lang')||'en'})},
   {data:new SlashCommandBuilder().setName('polly').setDescription('Play Polly-compatible TTS in your voice channel').addStringOption(o=>o.setName('text').setDescription('Text').setRequired(true)).addStringOption(o=>o.setName('voice').setDescription('Voice name')),execute:async i=>speak(i,'polly',i.options.getString('text',true),{voice:i.options.getString('voice')||'Brian'})},
-  {data:new SlashCommandBuilder().setName('autotts').setDescription('Enable or disable AutoTTS for your temporary room').addBooleanOption(o=>o.setName('enabled').setDescription('Enable AutoTTS').setRequired(true)),execute:async i=>{await i.deferReply({ephemeral:true});const r=roomFor(i);if(!r)return i.editReply({content:'Join your temporary voice room first.'});r.tts=tts.settingsFor(r,i.client);r.tts.autoTts=i.options.getBoolean('enabled',true);return i.editReply({content:'AutoTTS '+(r.tts.autoTts?'enabled':'disabled')+' for this room.'});}},
-  {data:new SlashCommandBuilder().setName('autottsprovider').setDescription('Choose the AutoTTS provider').addStringOption(o=>o.setName('provider').setDescription('Provider').setRequired(true).addChoices({name:'Microsoft Edge',value:'edge'},{name:'Google',value:'google'},{name:'StreamElements / Polly',value:'polly'})),execute:async i=>{await i.deferReply({ephemeral:true});const r=roomFor(i);if(!r)return i.editReply({content:'Join your temporary voice room first.'});r.tts=tts.settingsFor(r,i.client);r.tts.provider=i.options.getString('provider',true);return i.editReply({content:'AutoTTS provider set to **'+r.tts.provider+'**.'});}},
+  {data:new SlashCommandBuilder().setName('autotts').setDescription('Enable or disable AutoTTS for your temporary room').addBooleanOption(o=>o.setName('enabled').setDescription('Enable AutoTTS').setRequired(true)),execute:async i=>{await i.deferReply({flags:MessageFlags.Ephemeral});const r=roomFor(i);if(!r)return i.editReply({content:'Join your temporary voice room first.'});r.tts=tts.settingsFor(r,i.client);r.tts.autoTts=i.options.getBoolean('enabled',true);return i.editReply({content:'AutoTTS '+(r.tts.autoTts?'enabled':'disabled')+' for this room.'});}},
+  {data:new SlashCommandBuilder().setName('autottsprovider').setDescription('Choose the AutoTTS provider').addStringOption(o=>o.setName('provider').setDescription('Provider').setRequired(true).addChoices({name:'Microsoft Edge',value:'edge'},{name:'Google',value:'google'},{name:'StreamElements / Polly',value:'polly'})),execute:async i=>{await i.deferReply({flags:MessageFlags.Ephemeral});const r=roomFor(i);if(!r)return i.editReply({content:'Join your temporary voice room first.'});r.tts=tts.settingsFor(r,i.client);r.tts.provider=i.options.getString('provider',true);return i.editReply({content:'AutoTTS provider set to **'+r.tts.provider+'**.'});}},
   {data:new SlashCommandBuilder().setName('ttslangs').setDescription('Browse Google TTS languages'),execute:languageBrowser},
   {data:new SlashCommandBuilder().setName('langs').setDescription('Browse Google TTS languages'),execute:languageBrowser},
   {data:new SlashCommandBuilder().setName('ttsvoices').setDescription('Browse Edge TTS voices'),execute:voiceBrowser},
   {data:new SlashCommandBuilder().setName('voices').setDescription('Browse Edge TTS voices'),execute:voiceBrowser},
   {data:new SlashCommandBuilder().setName('lang').setDescription('Set your room Google TTS language').addStringOption(o=>o.setName('language').setDescription('Language name or code').setRequired(true)),execute:setLanguage},
-  {data:new SlashCommandBuilder().setName('voice').setDescription('Set the Edge TTS voice').addStringOption(o=>o.setName('voice').setDescription('Edge voice short name').setRequired(true)),execute:async i=>{if(!i.deferred&&!i.replied)await i.deferReply({ephemeral:true});const r=runtimeRoom(i);if(!r)return i.editReply({content:'Join a voice channel first.'});const name=i.options.getString('voice',true);try{const list=await tts.listVoices();const v=list.find(x=>(x.ShortName||x.Name)===name);if(!v)return i.editReply({content:'That Edge voice was not found. Use /ttsvoices.'});r.tts=tts.settingsFor(r,i.client);r.tts.provider='edge';r.tts.voice=name;r.tts.lang=v.Locale||r.tts.lang;return i.editReply({content:'Edge TTS voice set to **'+name+'**.'});}catch(e){return i.editReply({content:'Voice lookup failed: '+e.message});}}}
+  {data:new SlashCommandBuilder().setName('voice').setDescription('Set the Edge TTS voice').addStringOption(o=>o.setName('voice').setDescription('Edge voice short name').setRequired(true)),execute:async i=>{if(!i.deferred&&!i.replied)await i.deferReply({flags:MessageFlags.Ephemeral});const r=runtimeRoom(i);if(!r)return i.editReply({content:'Join a voice channel first.'});const name=i.options.getString('voice',true);try{const list=await tts.listVoices();const v=list.find(x=>(x.ShortName||x.Name)===name);if(!v)return i.editReply({content:'That Edge voice was not found. Use /ttsvoices.'});r.tts=tts.settingsFor(r,i.client);r.tts.provider='edge';r.tts.voice=name;r.tts.lang=v.Locale||r.tts.lang;return i.editReply({content:'Edge TTS voice set to **'+name+'**.'});}catch(e){return i.editReply({content:'Voice lookup failed: '+e.message});}}}
 ];
 
 module.exports={commands};
