@@ -21,6 +21,9 @@ const GOOGLE_TTS_URL = 'https://translate.google.com/translate_tts';
 const POLLY_TTS_URL = 'https://api.streamelements.com/kappa/v2/speech';
 const cache = { at: 0, voices: [] };
 const languageCache = { at: 0, values: [] };
+let voiceFetchPromise = null;
+let languageFetchPromise = null;
+const MAX_JSON_BYTES = 2 * 1024 * 1024;
 const MAX_AUDIO_BYTES = 8 * 1024 * 1024;
 const MAX_REMOTE_BYTES = 8 * 1024 * 1024;
 const DEFAULT_HTTP_TIMEOUT = 15000;
@@ -93,6 +96,30 @@ async function validateAudioFile(file, maxBytes = MAX_AUDIO_BYTES) {
   return { size: stat.size, sha256: await hashFile(file) };
 }
 
+async function readResponseBuffer(response, maxBytes = MAX_JSON_BYTES) {
+  const length = Number(response.headers.get('content-length') || 0);
+  if (Number.isFinite(length) && length > maxBytes) throw new Error('TTS API response exceeded the safety size limit.');
+  if (!response.body) throw new Error('TTS API returned no response body');
+  const chunks = [];
+  let total = 0;
+  const reader = response.body.getReader();
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > maxBytes) throw new Error('TTS API response exceeded the safety size limit.');
+      chunks.push(Buffer.from(value));
+    }
+  } catch (e) {
+    await reader.cancel().catch(() => {});
+    throw e;
+  } finally {
+    reader.releaseLock?.();
+  }
+  return Buffer.concat(chunks);
+}
+
 async function readRemoteAudio(response, maxBytes = MAX_REMOTE_BYTES) {
   const type = String(response.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
   const length = Number(response.headers.get('content-length') || 0);
@@ -129,20 +156,28 @@ function secMsGec() {
 
 async function listVoices(force = false) {
   if (!force && cache.voices.length && Date.now() - cache.at < 21600000) return cache.voices;
-  const url = VOICE_LIST_URL + '&Sec-MS-GEC=' + secMsGec() + '&Sec-MS-GEC-Version=1-' + CHROMIUM_FULL_VERSION;
-  const r = await fetchWithTimeout(url, {
-    headers: {
-      Accept: '*/*',
-      'Accept-Language': 'en-US,en;q=0.9',
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/' +
-        CHROMIUM_FULL_VERSION.split('.')[0] + '.0.0.0 Safari/537.36 Edg/' + CHROMIUM_FULL_VERSION.split('.')[0] + '.0.0.0'
-    }
-  });
-  if (!r.ok) throw new Error('Edge voices API HTTP ' + r.status);
-  const data = await r.json();
-  cache.voices = Array.isArray(data) ? data.filter(v => v?.ShortName || v?.Name) : [];
-  cache.at = Date.now();
-  return cache.voices;
+  if (voiceFetchPromise) return voiceFetchPromise;
+  voiceFetchPromise = (async () => {
+    const url = VOICE_LIST_URL + '&Sec-MS-GEC=' + secMsGec() + '&Sec-MS-GEC-Version=1-' + CHROMIUM_FULL_VERSION;
+    const r = await fetchWithTimeout(url, {
+      headers: {
+        Accept: '*/*',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/' +
+          CHROMIUM_FULL_VERSION.split('.')[0] + '.0.0.0 Safari/537.36 Edg/' + CHROMIUM_FULL_VERSION.split('.')[0] + '.0.0.0'
+      }
+    });
+    if (!r.ok) throw new Error('Edge voices API HTTP ' + r.status);
+    const data = JSON.parse((await readResponseBuffer(r)).toString('utf8'));
+    cache.voices = Array.isArray(data) ? data.filter(v => v?.ShortName || v?.Name) : [];
+    cache.at = Date.now();
+    return cache.voices;
+  })();
+  try {
+    return await voiceFetchPromise;
+  } finally {
+    voiceFetchPromise = null;
+  }
 }
 
 function languageList(voices) {
@@ -161,15 +196,23 @@ function languageList(voices) {
 
 async function listLanguages(force = false) {
   if (!force && languageCache.values.length && Date.now() - languageCache.at < 21600000) return languageCache.values;
-  const r = await fetchWithTimeout(GOOGLE_LANG_URL, { headers: { 'user-agent': 'RealmsNetwork-Bot/0.2', accept: 'application/json,*/*' } });
-  if (!r.ok) throw new Error('Google language API HTTP ' + r.status);
-  const data = await r.json();
-  languageCache.values = Object.entries(data || {})
-    .map(([code, name]) => ({ code: String(code), name: String(name) }))
-    .filter(x => x.code && x.name)
-    .sort((a, b) => a.name.localeCompare(b.name));
-  languageCache.at = Date.now();
-  return languageCache.values;
+  if (languageFetchPromise) return languageFetchPromise;
+  languageFetchPromise = (async () => {
+    const r = await fetchWithTimeout(GOOGLE_LANG_URL, { headers: { 'user-agent': 'RealmsNetwork-Bot/0.2', accept: 'application/json,*/*' } });
+    if (!r.ok) throw new Error('Google language API HTTP ' + r.status);
+    const data = JSON.parse((await readResponseBuffer(r)).toString('utf8'));
+    languageCache.values = Object.entries(data || {})
+      .map(([code, name]) => ({ code: String(code), name: String(name) }))
+      .filter(x => x.code && x.name)
+      .sort((a, b) => a.name.localeCompare(b.name));
+    languageCache.at = Date.now();
+    return languageCache.values;
+  })();
+  try {
+    return await languageFetchPromise;
+  } finally {
+    languageFetchPromise = null;
+  }
 }
 
 function rateValue(value) {
@@ -396,6 +439,7 @@ async function playNext(room,client) {
     if (stillCurrent) room.ttsQueue.shift();
     room.ttsPlaying = false;
     if (file) await fs.promises.rm(file, { force: true }).catch(() => {});
+    if (room.ttsCurrentFile === file) room.ttsCurrentFile = null;
     if (stillCurrent) await playNext(room,client);
     return;
   }
