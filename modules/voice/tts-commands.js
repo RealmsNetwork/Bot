@@ -84,7 +84,7 @@ async function languageBrowser(i){
       if(x.customId==='rn-tts-lang-next')page=Math.min(total-1,page+1);
       if(x.customId==='rn-tts-lang-last')page=total-1;
     }
-    await x.update(render());
+    await x.update(render()).catch(e => console.error('[TempVC/TTS] Browser update:', e?.message || e));
   });
   collector.on('end',async()=>{await i.editReply({components:[]}).catch(()=>{});});
 }
@@ -111,7 +111,7 @@ async function voiceBrowser(i){
     if(x.customId==='rn-tts-voice-prev')page=Math.max(0,page-1);
     if(x.customId==='rn-tts-voice-next')page=Math.min(total-1,page+1);
     if(x.customId==='rn-tts-voice-last')page=total-1;
-    await x.update(render());
+    await x.update(render()).catch(e => console.error('[TempVC/TTS] Browser update:', e?.message || e));
   });
   collector.on('end',async()=>{await i.editReply({components:[]}).catch(()=>{});});
 }
