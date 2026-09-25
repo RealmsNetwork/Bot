@@ -4,3 +4,4 @@ temporaryVoice:
   panelAutoPin: true
   panelAllowUserAccess: true
   panelAllowRoleAccess: true
+  allowOwnerTts: true
