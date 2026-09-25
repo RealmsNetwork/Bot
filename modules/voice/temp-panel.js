@@ -631,7 +631,17 @@ async function deleteRoom(client,rooms,room,guild,reason='Temporary voice room d
   if(!room||room.deleting)return;
   room.deleting=true;
   await tts.stop(room,client);
-  room.ttsConnection?.destroy?.();
+  const session=client.voiceSessions?.get(guild.id);
+  if(session?.connection===room.ttsConnection){
+    session.queue=[];
+    session.current=null;
+    session.player?.stop(true);
+    session.connection?.destroy?.();
+    session.connection=null;
+  }else{
+    room.ttsConnection?.destroy?.();
+  }
+  room.ttsConnection=null;
   const panel=room.panelChannelId&&guild.channels.cache.get(room.panelChannelId);
   const voice=guild.channels.cache.get(room.voiceChannelId);
   let panelDeleted=!panel;
