@@ -1,8 +1,30 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const Module = require('node:module');
+
+const originalLoad = Module._load;
+Module._load = function (request, parent, isMain) {
+  if (request === '@discordjs/voice') {
+    return {
+      AudioPlayerStatus: { Idle: 'idle' },
+      VoiceConnectionStatus: { Ready: 'ready', Disconnected: 'disconnected', Destroyed: 'destroyed' },
+      StreamType: { Arbitrary: 'arbitrary' },
+      createAudioPlayer: () => ({ on() {}, play() {}, stop() {} }),
+      createAudioResource: () => ({}),
+      joinVoiceChannel: () => ({}),
+      entersState: async () => {}
+    };
+  }
+  if (request === 'node-edge-tts') {
+    return { EdgeTTS: class {} };
+  }
+  return originalLoad.call(this, request, parent, isMain);
+};
 
 const { panelSlug } = require('../modules/voice/temp-panel');
 const { languageList, rateValue, volumeValue, settingsFor, speak } = require('../modules/voice/tts-service');
+
+Module._load = originalLoad;
 
 function clientWithTts(tts = {}, temporaryVoice = {}) {
   return {
