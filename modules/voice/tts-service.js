@@ -197,8 +197,6 @@ function ensurePlayer(room,client) {
   if (room.ttsPlaying === undefined) room.ttsPlaying = false;
   if (room.ttsPlayer) return room.ttsPlayer;
   room.ttsPlayer = createAudioPlayer();
-  room.ttsQueue = [];
-  room.ttsPlaying = false;
   room.ttsPlayer.on(AudioPlayerStatus.Idle, () => {
     room.ttsPlaying = false;
     playNext(room,client).catch(e => console.error('[TempVC/TTS]', e?.stack || e));
