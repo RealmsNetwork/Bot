@@ -616,18 +616,31 @@ async function create(client,member,voice,room){
 }
 
 async function deleteRoom(client,rooms,room,guild,reason='Temporary voice room deleted'){
-  if(!room)return;
-  rooms.delete(room.voiceChannelId);
+  if(!room||room.deleting)return;
+  room.deleting=true;
   await tts.stop(room,client);
-  await deletePersistedRoom(client,room);
   room.ttsConnection?.destroy?.();
   const panel=room.panelChannelId&&guild.channels.cache.get(room.panelChannelId);
   const voice=guild.channels.cache.get(room.voiceChannelId);
-  await panel?.delete(reason).catch(()=>{});
+  let panelDeleted=!panel;
+  let voiceDeleted=!voice;
+
+  if(panel){
+    panelDeleted=!!await panel.delete(reason).then(()=>true).catch(e=>{console.error('[TempVC] Failed to delete panel:',e?.message||e);return false;});
+  }
   if(voice&&voice.members.size){
     for(const member of voice.members.values())if(!member.user.bot)await member.voice.disconnect(reason).catch(()=>{});
   }
-  await voice?.delete(reason).catch(()=>{});
+  if(voice){
+    voiceDeleted=!!await voice.delete(reason).then(()=>true).catch(e=>{console.error('[TempVC] Failed to delete voice room:',e?.message||e);return false;});
+  }
+
+  if(panelDeleted&&voiceDeleted){
+    rooms.delete(room.voiceChannelId);
+    await deletePersistedRoom(client,room);
+  }else{
+    room.deleting=false;
+  }
 }
 
 async function syncPermissions(room,guild,client){
@@ -865,7 +878,20 @@ async function handleButton(interaction,client,rooms){
   else if(action==='toggle-sync')room.syncPermissions=room.syncPermissions===false;
   else if(action==='toggle-operators')room.operatorControls=room.operatorControls===false;
   else if(action==='rebuild'){room.panelMessageId=null;return panelUpdate(interaction,client,room,room.page);}
-  else if(action==='disconnect-bot'){client.voiceSessions?.get(guild.id)?.connection?.destroy?.();room.ttsConnection?.destroy?.();}
+  else if(action==='disconnect-bot'){
+    await tts.stop(room,client);
+    const session=client.voiceSessions?.get(guild.id);
+    if(session?.connection===room.ttsConnection){
+      session.queue=[];
+      session.current=null;
+      session.player?.stop(true);
+      session.connection?.destroy?.();
+      session.connection=null;
+    }else{
+      room.ttsConnection?.destroy?.();
+    }
+    room.ttsConnection=null;
+  }
   else if(action==='room-chat')return panelNotice(interaction,'Open <#'+room.voiceChannelId+'> to use Discord voice-channel chat and AutoTTS.');
   else if(action==='tts-enable')room.tts.enabled=true;
   else if(action==='tts-disable')room.tts.enabled=false;
@@ -990,7 +1016,11 @@ async function recover(client,rooms){
       const voiceId=channel.topic.match(/voice=(\d+)/)?.[1];
       if(!owner||!voiceId)continue;
       const voice=guild.channels.cache.get(voiceId)||await guild.channels.fetch(voiceId).catch(()=>null);
-      if(!voice||voice.type!==ChannelType.GuildVoice){await channel.delete('Temporary VC voice channel missing').catch(()=>{});continue;}
+      if(!voice||voice.type!==ChannelType.GuildVoice){
+        await channel.delete('Temporary VC voice channel missing').catch(()=>{});
+        if(voice?.id)await client.db?.delete?.(guild.id,'tempvc:'+voice.id).catch(()=>{});
+        continue;
+      }
 
       const saved=await client.db?.get?.(guild.id,'tempvc:'+voice.id,null);
       const hasSavedState=saved?.version===1&&/^\d{17,20}$/.test(String(saved.ownerId||''));
@@ -1051,6 +1081,7 @@ async function cleanup(client,rooms){
     const voice=guild.channels.cache.get(room.voiceChannelId);
     if(!voice){
       rooms.delete(room.voiceChannelId);
+      await deletePersistedRoom(client,room);
       const panel=room.panelChannelId&&guild.channels.cache.get(room.panelChannelId);
       await panel?.delete('Temporary VC voice channel missing').catch(()=>{});
       continue;
