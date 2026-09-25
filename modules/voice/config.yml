@@ -28,10 +28,15 @@ music:
 
 tts:
   enabled: true
+  provider: edge
   defaultVoice: en-US-AriaNeural
   defaultLanguage: en-US
+  panelEditable: true
+  autoTts: false
   maxCharacters: 500
   maxRate: 100
+  outputFormat: audio-24khz-96kbitrate-mono-mp3
+  timeoutMs: 15000
   maxVolume: 100
   cooldownSeconds: 3
   allowUserVoiceSelection: true
@@ -64,6 +69,7 @@ temporaryVoice:
   panelAllowTtsControl: true
   panelAllowUserAccess: true
   panelAllowRoleAccess: true
+  panelAccessCanControl: true
   allowOwnerTts: true
   panelEnabled: true
   panelSuffix: "-panel"
