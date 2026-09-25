@@ -284,10 +284,10 @@ function resumeMusicAfterTts(client, room) {
   if (!room.ttsPausedMusic) return;
   room.ttsPausedMusic = false;
   const session = client.voiceSessions?.get(room.guildId);
-  if (session?.connection !== room.ttsConnection) return;
-  if (session.current && session.player?.state?.status === AudioPlayerStatus.Paused) {
-    session.player.unpause();
-  }
+  if (!session?.connection || session.connection !== room.ttsConnection) return;
+  if (!session.current) return;
+  session.connection.subscribe(session.player);
+  if (session.player?.state?.status === AudioPlayerStatus.Paused) session.player.unpause();
 }
 
 function ensurePlayer(room,client) {
