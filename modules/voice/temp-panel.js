@@ -298,8 +298,12 @@ function buildPayload(client, room, extras = {}) {
         button('tts-languages','Browse Languages',ButtonStyle.Primary),
         button('tts-voice-manual','Set Voice',ButtonStyle.Primary),
         button('rate-down','Rate -'),
-        button('rate-up','Rate +'),
-        button('volume','Volume')
+        button('rate-up','Rate +')
+      ),
+      new ActionRowBuilder().addComponents(
+        button('volume','Volume'),
+        button('room-chat','Room Chat'),
+        button('refresh','Refresh')
       )
     );
   } else if (page === 'tts-voices') {
