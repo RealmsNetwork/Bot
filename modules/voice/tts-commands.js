@@ -97,7 +97,7 @@ function languageFilter(list,filter){
 async function languageBrowser(i){
   await i.deferReply({flags:MessageFlags.Ephemeral});
   let all=[];
-  try{all=await tts.listLanguages();}catch(e){return i.editReply('Could not load the language API: '+e.message);}
+  try{all=await tts.listLanguages();}catch(e){return i.editReply('Could not load the languages right now. Please try again.');}
   let filter='all',page=0;
   const per=5;
   const filterMenu=()=>new ActionRowBuilder().addComponents(new StringSelectMenuBuilder().setCustomId('rn-tts-lang-filter').setPlaceholder('Filter languages...').addOptions([
@@ -113,7 +113,7 @@ async function languageBrowser(i){
     page=Math.min(page,total-1);
     const items=filtered.slice(page*per,page*per+per);
     return {
-      embeds:[new EmbedBuilder().setColor(0x8b5cf6).setTitle('Available Google TTS Languages').setDescription(items.length?items.map(x=>x.name+' • '+x.code).join('\\n\\n'):'No languages found.').setFooter({text:'Page '+(page+1)+' of '+total+' • '+filtered.length+' languages'})],
+      embeds:[new EmbedBuilder().setColor(0x8b5cf6).setTitle('Languages').setDescription(items.length?items.map(x=>x.name+' • '+x.code).join('\\n\\n'):'No languages found.').setFooter({text:'Page '+(page+1)+' of '+total+' • '+filtered.length+' languages'})],
       components:[filterMenu(),pageButtons('rn-tts-lang',page,total)]
     };
   };
@@ -137,7 +137,7 @@ async function languageBrowser(i){
 async function voiceBrowser(i){
   await i.deferReply({flags:MessageFlags.Ephemeral});
   let all=[];
-  try{all=await tts.listVoices();}catch(e){return i.editReply('Could not load the Edge voice API: '+e.message);}
+  try{all=await tts.listVoices();}catch(e){return i.editReply('Could not load the voices right now. Please try again.');}
   let page=0;
   const per=5;
   const render=()=>{
@@ -145,7 +145,7 @@ async function voiceBrowser(i){
     page=Math.min(page,total-1);
     const items=all.slice(page*per,page*per+per);
     const text=items.length?items.map(v=>String(v.ShortName||v.Name)+' • '+String(v.Locale||'')+' • '+String(v.Gender||'')).join('\\n\\n'):'No voices found.';
-    return {embeds:[new EmbedBuilder().setColor(0x8b5cf6).setTitle('Available Edge TTS Voices').setDescription(text).setFooter({text:'Page '+(page+1)+' of '+total+' • '+all.length+' voices'})],components:[pageButtons('rn-tts-voice',page,total)]};
+    return {embeds:[new EmbedBuilder().setColor(0x8b5cf6).setTitle('Voices').setDescription(text).setFooter({text:'Page '+(page+1)+' of '+total+' • '+all.length+' voices'})],components:[pageButtons('rn-tts-voice',page,total)]};
   };
   const msg=await i.editReply(render());
   const collector=msg.createMessageComponentCollector({time:120000});
@@ -161,20 +161,20 @@ async function voiceBrowser(i){
   collector.on('end',async()=>{await i.editReply({components:[]}).catch(()=>{});});
 }
 
-async function setLanguage(i){if(!i.deferred&&!i.replied)await i.deferReply({flags:MessageFlags.Ephemeral});const r=roomFor(i);if(!r)return i.editReply({content:'Join your temporary voice room first.'});if(!controlConfigEnabled(i)||!voiceSelectionEnabled(i)||!canControlTts(i,r))return i.editReply({content:'You do not have permission to change TTS voice settings for this room.'});const value=i.options.getString('language',true);try{const list=await tts.listLanguages();const match=list.find(x=>x.code.toLowerCase()===value.toLowerCase()||x.name.toLowerCase()===value.toLowerCase());if(!match)return i.editReply({content:'That Google language was not found. Use /ttslangs.'});r.tts=tts.settingsFor(r,i.client);r.tts.provider='google';r.tts.lang=match.code;if(!(await tempPanel.persistRoom(i.client,r)))return i.editReply({content:'The setting changed in memory but could not be safely saved. Please try again.'});return i.editReply({content:'Google TTS language set to **'+match.name+'** ('+match.code+').'});}catch(e){return i.editReply({content:'Language lookup failed: '+e.message});}}
+async function setLanguage(i){if(!i.deferred&&!i.replied)await i.deferReply({flags:MessageFlags.Ephemeral});const r=roomFor(i);if(!r)return i.editReply({content:'Join your temporary voice room first.'});if(!controlConfigEnabled(i)||!voiceSelectionEnabled(i)||!canControlTts(i,r))return i.editReply({content:'You do not have permission to change TTS voice settings for this room.'});const value=i.options.getString('language',true);try{const list=await tts.listLanguages();const match=list.find(x=>x.code.toLowerCase()===value.toLowerCase()||x.name.toLowerCase()===value.toLowerCase());if(!match)return i.editReply({content:'That language was not found. Try /langs.'});r.tts=tts.settingsFor(r,i.client);r.tts.provider='google';r.tts.lang=match.code;if(!(await tempPanel.persistRoom(i.client,r)))return i.editReply({content:'The setting changed in memory but could not be safely saved. Please try again.'});return i.editReply({content:'Language set to **'+match.name+'**.'});}catch(e){return i.editReply({content:'Language lookup failed: '+e.message});}}
 
 const commands=[
   {data:new SlashCommandBuilder().setName('tts').setDescription('Speak text using the selected TTS provider').addStringOption(o=>o.setName('text').setDescription('Text to speak').setRequired(true)).addStringOption(o=>o.setName('provider').setDescription('TTS provider').addChoices({name:'Microsoft Edge',value:'edge'},{name:'Google',value:'google'},{name:'StreamElements / Polly',value:'polly'})).addStringOption(o=>o.setName('lang').setDescription('Language / locale code')).addStringOption(o=>o.setName('voice').setDescription('Voice name')),execute:async i=>speak(i,i.options.getString('provider'),i.options.getString('text',true),{lang:i.options.getString('lang'),voice:i.options.getString('voice')})},
-  {data:new SlashCommandBuilder().setName('google').setDescription('Play Google TTS in your voice channel').addStringOption(o=>o.setName('text').setDescription('Text').setRequired(true)).addStringOption(o=>o.setName('lang').setDescription('Google language code')),execute:async i=>speak(i,'google',i.options.getString('text',true),{lang:i.options.getString('lang')||undefined})},
-  {data:new SlashCommandBuilder().setName('polly').setDescription('Play Polly-compatible TTS in your voice channel').addStringOption(o=>o.setName('text').setDescription('Text').setRequired(true)).addStringOption(o=>o.setName('voice').setDescription('Voice name')),execute:async i=>speak(i,'polly',i.options.getString('text',true),{voice:i.options.getString('voice')||undefined})},
+  {data:new SlashCommandBuilder().setName('google').setDescription('Speak in your voice channel').addStringOption(o=>o.setName('text').setDescription('Text').setRequired(true)).addStringOption(o=>o.setName('lang').setDescription('Language')),execute:async i=>speak(i,'google',i.options.getString('text',true),{lang:i.options.getString('lang')||undefined})},
+  {data:new SlashCommandBuilder().setName('polly').setDescription('Speak in your voice channel').addStringOption(o=>o.setName('text').setDescription('Text').setRequired(true)).addStringOption(o=>o.setName('voice').setDescription('Voice name')),execute:async i=>speak(i,'polly',i.options.getString('text',true),{voice:i.options.getString('voice')||undefined})},
   {data:new SlashCommandBuilder().setName('autotts').setDescription('Enable or disable AutoTTS for your temporary room').addBooleanOption(o=>o.setName('enabled').setDescription('Enable AutoTTS').setRequired(true)),execute:async i=>{await i.deferReply({flags:MessageFlags.Ephemeral});const r=roomFor(i);if(!r)return i.editReply({content:'Join your temporary voice room first.'});if(!controlConfigEnabled(i)||!canControlTts(i,r))return i.editReply({content:'You do not have permission to change TTS settings for this room.'});r.tts=tts.settingsFor(r,i.client);r.tts.autoTts=i.options.getBoolean('enabled',true);if(!(await tempPanel.persistRoom(i.client,r)))return i.editReply({content:'The setting changed in memory but could not be safely saved. Please try again.'});return i.editReply({content:'AutoTTS '+(r.tts.autoTts?'enabled':'disabled')+' for this room.'});}},
   {data:new SlashCommandBuilder().setName('autottsprovider').setDescription('Choose the AutoTTS provider').addStringOption(o=>o.setName('provider').setDescription('Provider').setRequired(true).addChoices({name:'Microsoft Edge',value:'edge'},{name:'Google',value:'google'},{name:'StreamElements / Polly',value:'polly'})),execute:async i=>{await i.deferReply({flags:MessageFlags.Ephemeral});const r=roomFor(i);if(!r)return i.editReply({content:'Join your temporary voice room first.'});if(!controlConfigEnabled(i)||!canControlTts(i,r))return i.editReply({content:'You do not have permission to change TTS settings for this room.'});r.tts=tts.settingsFor(r,i.client);r.tts.provider=i.options.getString('provider',true);if(!(await tempPanel.persistRoom(i.client,r)))return i.editReply({content:'The setting changed in memory but could not be safely saved. Please try again.'});return i.editReply({content:'AutoTTS provider set to **'+r.tts.provider+'**.'});}},
-  {data:new SlashCommandBuilder().setName('ttslangs').setDescription('Browse Google TTS languages'),execute:languageBrowser},
+  {data:new SlashCommandBuilder().setName('ttslangs').setDescription('Browse languages'),execute:languageBrowser},
   {data:new SlashCommandBuilder().setName('langs').setDescription('Browse Google TTS languages'),execute:languageBrowser},
-  {data:new SlashCommandBuilder().setName('ttsvoices').setDescription('Browse Edge TTS voices'),execute:voiceBrowser},
+  {data:new SlashCommandBuilder().setName('ttsvoices').setDescription('Browse voices'),execute:voiceBrowser},
   {data:new SlashCommandBuilder().setName('voices').setDescription('Browse Edge TTS voices'),execute:voiceBrowser},
-  {data:new SlashCommandBuilder().setName('lang').setDescription('Set your room Google TTS language').addStringOption(o=>o.setName('language').setDescription('Language name or code').setRequired(true)),execute:setLanguage},
-  {data:new SlashCommandBuilder().setName('voice').setDescription('Set the Edge TTS voice').addStringOption(o=>o.setName('voice').setDescription('Edge voice short name').setRequired(true)),execute:async i=>{if(!i.deferred&&!i.replied)await i.deferReply({flags:MessageFlags.Ephemeral});const r=roomFor(i);if(!r)return i.editReply({content:'Join your temporary voice room first.'});if(!controlConfigEnabled(i)||!voiceSelectionEnabled(i)||!canControlTts(i,r))return i.editReply({content:'You do not have permission to change TTS voice settings for this room.'});const name=i.options.getString('voice',true);try{const list=await tts.listVoices();const v=list.find(x=>(x.ShortName||x.Name)===name);if(!v)return i.editReply({content:'That Edge voice was not found. Use /ttsvoices.'});r.tts=tts.settingsFor(r,i.client);r.tts.provider='edge';r.tts.voice=name;r.tts.lang=v.Locale||r.tts.lang;if(!(await tempPanel.persistRoom(i.client,r)))return i.editReply({content:'The setting changed in memory but could not be safely saved. Please try again.'});return i.editReply({content:'Edge TTS voice set to **'+name+'**.'});}catch(e){return i.editReply({content:'Voice lookup failed: '+e.message});}}}
+  {data:new SlashCommandBuilder().setName('lang').setDescription('Set your room language').addStringOption(o=>o.setName('language').setDescription('Language name or code').setRequired(true)),execute:setLanguage},
+  {data:new SlashCommandBuilder().setName('voice').setDescription('Set your voice').addStringOption(o=>o.setName('voice').setDescription('Edge voice short name').setRequired(true)),execute:async i=>{if(!i.deferred&&!i.replied)await i.deferReply({flags:MessageFlags.Ephemeral});const r=roomFor(i);if(!r)return i.editReply({content:'Join your temporary voice room first.'});if(!controlConfigEnabled(i)||!voiceSelectionEnabled(i)||!canControlTts(i,r))return i.editReply({content:'You do not have permission to change TTS voice settings for this room.'});const name=i.options.getString('voice',true);try{const list=await tts.listVoices();const v=list.find(x=>(x.ShortName||x.Name)===name);if(!v)return i.editReply({content:'That voice was not found. Try /voices.'});r.tts=tts.settingsFor(r,i.client);r.tts.provider='edge';r.tts.voice=name;r.tts.lang=v.Locale||r.tts.lang;if(!(await tempPanel.persistRoom(i.client,r)))return i.editReply({content:'The setting changed in memory but could not be safely saved. Please try again.'});return i.editReply({content:'Voice set to **'+name+'**.'});}catch(e){return i.editReply({content:'Voice lookup failed: '+e.message});}}}
 ];
 
 module.exports={commands};
