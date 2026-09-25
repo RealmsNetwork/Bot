@@ -623,7 +623,11 @@ async function grant(room,guild,id,type,client){
   try{
     await syncPermissions(room,guild,client);
   }catch(e){
-    if(!hadAccess)targetSet.delete(id);
+    if(!hadAccess){
+      targetSet.delete(id);
+      await guild.channels.cache.get(room.panelChannelId)?.permissionOverwrites.edit(id,{ViewChannel:null,ReadMessageHistory:null,SendMessages:null}).catch(()=>{});
+      if(room.syncPermissions!==false)await guild.channels.cache.get(room.voiceChannelId)?.permissionOverwrites.edit(id,{ViewChannel:null,Connect:null,Speak:null}).catch(()=>{});
+    }
     throw e;
   }
 }
@@ -738,16 +742,16 @@ async function handleButton(interaction,client,rooms){
   }
   else if(action==='ban'){
     if(!member||member.id===interaction.user.id)return panelNotice(interaction,'Select another member first.');
+    await voice.permissionOverwrites.edit(member.id,{ViewChannel:false,Connect:false});
     room.bannedUsers.add(member.id);
     room.accessUsers.delete(member.id);
-    await voice.permissionOverwrites.edit(member.id,{ViewChannel:false,Connect:false});
-    await guild.channels.cache.get(room.panelChannelId)?.permissionOverwrites.delete(member.id).catch(()=>{});
+    await guild.channels.cache.get(room.panelChannelId)?.permissionOverwrites.edit(member.id,{ViewChannel:null,ReadMessageHistory:null,SendMessages:null}).catch(e=>console.error('[TempVC/Panel] Failed to remove banned panel access:',e?.message||e));
     if(targetIsInRoom(member,room))await member.voice.disconnect('Banned from temporary VC').catch(()=>{});
   }
   else if(action==='unban'){
     if(!member)return panelNotice(interaction,'Select a member first.');
+    await voice.permissionOverwrites.edit(member.id,{ViewChannel:null,Connect:null});
     room.bannedUsers.delete(member.id);
-    await voice.permissionOverwrites.edit(member.id,{ViewChannel:null,Connect:null}).catch(()=>{});
   }
   else if(action==='mute'||action==='unmute'){
     if(!member||member.id===interaction.user.id)return panelNotice(interaction,'Select another member first.');
@@ -761,11 +765,23 @@ async function handleButton(interaction,client,rooms){
   }
   else if(action==='transfer-selected'){
     if(!member)return panelNotice(interaction,'Select a member first.');
+    if(member.user.bot)return panelNotice(interaction,'A bot cannot own a temporary voice room.');
     if(!targetIsInRoom(member,room))return panelNotice(interaction,'The new owner must be in this temporary voice room.');
     if(room.bannedUsers.has(member.id))return panelNotice(interaction,'That member is banned from the room.');
-    room.ownerId=member.id;room.accessUsers.add(member.id);room.operatorControls=room.operatorControls!==false;
-    await voice.permissionOverwrites.edit(member.id,{ViewChannel:true,Connect:true,Speak:true});
-    await guild.channels.cache.get(room.panelChannelId)?.permissionOverwrites.edit(member.id,{ViewChannel:true,ReadMessageHistory:true,SendMessages:false});
+    const previousOwner=room.ownerId;
+    const wasUserAccess=room.accessUsers.has(member.id);
+    try{
+      await voice.permissionOverwrites.edit(member.id,{ViewChannel:true,Connect:true,Speak:true});
+      await guild.channels.cache.get(room.panelChannelId)?.permissionOverwrites.edit(member.id,{ViewChannel:true,ReadMessageHistory:true,SendMessages:false});
+      room.ownerId=member.id;
+      room.accessUsers.add(member.id);
+      room.operatorControls=room.operatorControls!==false;
+    }catch(e){
+      if(!wasUserAccess)await voice.permissionOverwrites.edit(member.id,{ViewChannel:null,Connect:null,Speak:null}).catch(()=>{});
+      if(!wasUserAccess)await guild.channels.cache.get(room.panelChannelId)?.permissionOverwrites.edit(member.id,{ViewChannel:null,ReadMessageHistory:null,SendMessages:null}).catch(()=>{});
+      room.ownerId=previousOwner;
+      throw e;
+    }
   }
   else if(action==='panel-selected'){
     if(!member)return panelNotice(interaction,'Select a member first.');
@@ -781,13 +797,13 @@ async function handleButton(interaction,client,rooms){
   else if(action==='revoke-role'){const id=selected(interaction,'access-role');if(!id)return panelNotice(interaction,'Select a role first.');await revoke(room,guild,id,'role',client);}
   else if(action==='reset-access'){
     const managedIds=new Set([...room.accessUsers,...room.accessRoles,...room.bannedUsers]);
-    room.accessUsers=new Set([room.ownerId]);room.accessRoles=new Set();room.bannedUsers=new Set();
     const panel=guild.channels.cache.get(room.panelChannelId);
     for(const id of managedIds){
       if(id===room.ownerId)continue;
-      await panel?.permissionOverwrites.edit(id,{ViewChannel:null,ReadMessageHistory:null,SendMessages:null}).catch(()=>{});
-      await voice.permissionOverwrites.edit(id,{ViewChannel:null,Connect:null,Speak:null}).catch(()=>{});
+      await panel?.permissionOverwrites.edit(id,{ViewChannel:null,ReadMessageHistory:null,SendMessages:null});
+      await voice.permissionOverwrites.edit(id,{ViewChannel:null,Connect:null,Speak:null});
     }
+    room.accessUsers=new Set([room.ownerId]);room.accessRoles=new Set();room.bannedUsers=new Set();
   }
   else if(action==='sync-perms')await syncPermissions(room,guild,client);
   else if(action==='toggle-sync')room.syncPermissions=room.syncPermissions===false;
