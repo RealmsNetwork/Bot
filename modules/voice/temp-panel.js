@@ -40,6 +40,7 @@ function roomSnapshot(room) {
     operatorControls: room.operatorControls !== false,
     syncPermissions: room.syncPermissions !== false,
     emptySince: Number.isFinite(Number(room.emptySince)) ? Number(room.emptySince) : null,
+    ownerLeftSince: Number.isFinite(Number(room.ownerLeftSince)) ? Number(room.ownerLeftSince) : null,
     tts: {
       provider: room.tts?.provider,
       voice: room.tts?.voice,
@@ -111,6 +112,11 @@ async function deletePersistedRoom(client, room) {
 
 function emptyGraceMs(client) {
   const seconds = Number(tc(client).emptyRoomGraceSeconds);
+  return (Number.isFinite(seconds) ? Math.max(0, Math.min(86400, seconds)) : 300) * 1000;
+}
+
+function ownerLeaveGraceMs(client) {
+  const seconds = Number(tc(client).ownerLeaveGraceSeconds);
   return (Number.isFinite(seconds) ? Math.max(0, Math.min(86400, seconds)) : 300) * 1000;
 }
 
@@ -1237,6 +1243,7 @@ async function recover(client,rooms){
         syncPermissions:hasSavedState?saved.syncPermissions!==false:tc(client).syncPermissions !== false,
         emptySince:hasSavedState&&Number.isFinite(Number(saved.emptySince))?Number(saved.emptySince):(voice.members.size===0?Date.now():null),
         recoveryGraceUntil:voice.members.size===0?Date.now()+recoveryGraceMs(client):0,
+        ownerLeftSince:hasSavedState&&Number.isFinite(Number(saved.ownerLeftSince))?Number(saved.ownerLeftSince):(voice.members.has(String(hasSavedState?saved.ownerId:owner))?null:Date.now()),
         tts:hasSavedState&&saved.tts&&typeof saved.tts==='object'?saved.tts:{},
         ttsBrowser:{kind:null,page:0}
       };
@@ -1257,17 +1264,7 @@ async function recover(client,rooms){
         await channel.setTopic(PANEL_TOPIC_PREFIX+'owner='+room.ownerId+' | voice='+voice.id,'Migrate temporary VC panel metadata to v2').catch(()=>{});
       }
 
-      if(tc(client).autoTransferOnOwnerLeave!==false&&!voice.members.has(room.ownerId)&&voice.members.size>0){
-        const next=[...voice.members.values()]
-          .filter(member=>!member.user.bot&&!room.bannedUsers.has(member.id))
-          .sort((a,b)=>(a.joinedTimestamp||0)-(b.joinedTimestamp||0))[0];
-        if(next){
-          room.ownerId=next.id;
-          room.accessUsers.add(next.id);
-          await voice.permissionOverwrites.edit(next.id,{Connect:true,Speak:true,ViewChannel:true}).catch(()=>{});
-          await channel.permissionOverwrites.edit(next.id,{ViewChannel:true,ReadMessageHistory:true,SendMessages:false}).catch(()=>{});
-        }
-      }
+
 
       if(!room.panelMessageId){
         const existing=await channel.messages.fetch({limit:25}).then(messages=>[
@@ -1299,8 +1296,38 @@ async function cleanup(client,rooms){
         await panel?.delete('Temporary VC voice channel missing').catch(()=>{});
         continue;
       }
+      const now=Date.now();
+      const ownerPresent=voice.members.has(room.ownerId);
+      if(ownerPresent){
+        if(room.ownerLeftSince){
+          room.ownerLeftSince=null;
+          await persistRoom(client,room);
+        }
+      }else if(room.ownerId&&tc(client).autoTransferOnOwnerLeave!==false&&voice.members.size>0){
+        if(!room.ownerLeftSince){
+          room.ownerLeftSince=now;
+          await persistRoom(client,room);
+        }
+        const graceMs=ownerLeaveGraceMs(client);
+        if(now-Number(room.ownerLeftSince)>=graceMs){
+          const next=[...voice.members.values()]
+            .filter(member=>!member.user.bot&&!room.bannedUsers.has(member.id))
+            .sort((a,b)=>(a.joinedTimestamp||0)-(b.joinedTimestamp||0))[0];
+          if(next){
+            room.ownerId=next.id;
+            room.ownerLeftSince=null;
+            room.accessUsers.add(next.id);
+            room.controlUsers?.add(next.id);
+            await voice.permissionOverwrites.edit(next.id,{Connect:true,Speak:true,ViewChannel:true}).catch(()=>{});
+            const panel=guild.channels.cache.get(room.panelChannelId);
+            await panel?.permissionOverwrites.edit(next.id,{ViewChannel:true,ReadMessageHistory:true,SendMessages:false}).catch(()=>{});
+            await persistRoom(client,room);
+            await refresh(client,room,'overview').catch(()=>{});
+          }
+        }
+      }
+
       if(voice.members.size===0){
-        const now=Date.now();
         if(!room.emptySince){
           room.emptySince=now;
           await persistRoom(client,room);
