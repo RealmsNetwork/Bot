@@ -417,7 +417,8 @@ function settingsFor(room, client) {
   room.tts.timeoutMs = finiteConfigNumber(c.timeoutMs, DEFAULT_HTTP_TIMEOUT, 1000, 120000);
   room.tts.maxAudioBytes = finiteConfigNumber(c.maxAudioBytes, MAX_AUDIO_BYTES, 64 * 1024, 32 * 1024 * 1024);
   room.tts.maxRemoteBytes = finiteConfigNumber(c.maxRemoteBytes, MAX_REMOTE_BYTES, 64 * 1024, 32 * 1024 * 1024);
-  if (room.tts.enabled === undefined) room.tts.enabled = c.enabled !== false;
+  if (c.enabled === false) room.tts.enabled = false;
+  else if (room.tts.enabled === undefined) room.tts.enabled = true;
   if (room.tts.autoTts === undefined) room.tts.autoTts = false;
   if (room.tts.prefixName === undefined) room.tts.prefixName = true;
   return room.tts;
@@ -466,7 +467,7 @@ async function playNext(room,client) {
     }
     if (!room.ttsConnection || room.ttsConnection.state.status !== VoiceConnectionStatus.Ready) throw new Error('Voice connection is unavailable.');
     ensurePlayer(room,client);
-    await setBotMute(client,room,false);
+    if (!await setBotMute(client,room,false)) throw new Error('The bot could not unmute itself for TTS playback.');
     if (generation !== (room.ttsGeneration || 0) || !room.ttsQueue?.length || room.ttsQueue[0] !== item) {
       if (file) await fs.promises.rm(file, { force: true }).catch(() => {});
       room.ttsPlaying = false;
@@ -513,9 +514,10 @@ async function speak(client, room, text, member, overrides = {}) {
   if (settings.enabled === false) throw new Error('TTS is disabled for this room.');
   let phrase = String(text || '').replace(/\s+/g, ' ').trim();
   if (!phrase) throw new Error('TTS text cannot be empty.');
-  const max = Math.max(20, Number(client.modules.get('voice')?.config?.tts?.maxCharacters || 500));
+  const configuredMax = Number(client.modules.get('voice')?.config?.tts?.maxCharacters);
+  const max = Number.isFinite(configuredMax) ? Math.max(1, Math.min(2000, configuredMax)) : 500;
   phrase = phrase.slice(0, max);
-  if (settings.prefixName && member?.displayName) phrase = member.displayName + ' says ' + phrase;
+  if (settings.prefixName && member?.displayName) phrase = (member.displayName + ' says ' + phrase).slice(0, max);
   const queueLimit = finiteConfigNumber(client.modules.get('voice')?.config?.tts?.maxQueueSize, 20, 1, 100);
   if ((room.ttsQueue?.length || 0) >= queueLimit) throw new Error('TTS queue is full. Please wait for the current speech to finish.');
   if (!room.guildId || !room.voiceChannelId) throw new Error('Invalid temporary voice room state.');
