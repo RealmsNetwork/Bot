@@ -350,7 +350,7 @@ async function ensureConnection(client, room) {
     if (room.ttsConnection === connection) room.ttsConnection = null;
   }
 
-  const work = (async () => {
+  const promise = (async () => {
     const next = joinVoiceChannel({
       channelId: channel.id,
       guildId: guild.id,
@@ -370,14 +370,14 @@ async function ensureConnection(client, room) {
     return next;
   })();
 
-  if (currentSession) currentSession.connectionPromise = work;
-  else room.ttsConnectionPromise = work;
+  if (currentSession) currentSession.connectionPromise = promise;
+  else room.ttsConnectionPromise = promise;
 
   try {
-    return await work;
+    return await promise;
   } finally {
-    if (currentSession?.connectionPromise === work) currentSession.connectionPromise = null;
-    if (!currentSession && room.ttsConnectionPromise === work) room.ttsConnectionPromise = null;
+    if (currentSession?.connectionPromise === promise) currentSession.connectionPromise = null;
+    if (!currentSession && room.ttsConnectionPromise === promise) room.ttsConnectionPromise = null;
   }
 }
 
