@@ -49,6 +49,8 @@ function normalizeRoom(room, client) {
   room.accessUsers.add(room.ownerId);
   room.page = room.page || 'overview';
   room.tts = tts.settingsFor(room, client);
+  if (room.operatorControls === undefined) room.operatorControls = tc(client).panelAccessCanControl !== false;
+  if (room.syncPermissions === undefined) room.syncPermissions = tc(client).syncPermissions !== false;
   room.ttsBrowser = room.ttsBrowser || { kind: null, page: 0 };
   return room;
 }
@@ -74,13 +76,13 @@ function canAccess(interaction, room) {
 }
 
 function ownerOnlyAction(action) {
-  return ['claim','delete','reset-access','transfer-selected','ban','unban'].includes(action);
+  return ['claim','delete','reset-access','transfer-selected'].includes(action);
 }
 
 function canControl(interaction, room, client, action) {
   if (interaction.user.id === room.ownerId) return true;
   if (ownerOnlyAction(action)) return false;
-  return tc(client).panelAccessCanControl !== false;
+  return room.operatorControls !== false;
 }
 
 function pageMenu(page) {
@@ -346,8 +348,8 @@ function buildPayload(client, room, extras = {}) {
       '### Permission Management',
       '**Panel users:** ' + Math.max(0,room.accessUsers.size-1),
       '**Panel roles:** ' + room.accessRoles.size,
-      '**Sync to VC:** ' + (c.syncPermissions !== false ? 'Enabled' : 'Disabled'),
-      '**Operator controls:** ' + (c.panelAccessCanControl !== false ? 'Enabled' : 'Disabled'),
+      '**Sync to VC:** ' + (room.syncPermissions !== false ? 'Enabled' : 'Disabled'),
+      '**Operator controls:** ' + (room.operatorControls !== false ? 'Enabled' : 'Disabled'),
       '',
       'Owner-only actions stay protected.'
     ].join('\n');
@@ -508,7 +510,7 @@ async function revoke(room,guild,id,type,client){
   if(id===room.ownerId)throw new Error('The owner cannot be removed from panel access.');
   if(type==='role')room.accessRoles.delete(id);else room.accessUsers.delete(id);
   await guild.channels.cache.get(room.panelChannelId)?.permissionOverwrites.delete(id).catch(()=>{});
-  if(tc(client).syncPermissions!==false)await guild.channels.cache.get(room.voiceChannelId)?.permissionOverwrites.delete(id).catch(()=>{});
+  if(room.syncPermissions!==false)await guild.channels.cache.get(room.voiceChannelId)?.permissionOverwrites.delete(id).catch(()=>{});
 }
 
 async function showForm(interaction,kind){
@@ -605,7 +607,7 @@ async function handleButton(interaction,client,rooms){
   else if(action==='transfer-selected'){
     if(!member)return interaction.reply({content:'Select a member first.',ephemeral:true});
     if(room.bannedUsers.has(member.id))return interaction.reply({content:'That member is banned from the room.',ephemeral:true});
-    room.ownerId=member.id;room.accessUsers.add(member.id);
+    room.ownerId=member.id;room.accessUsers.add(member.id);room.operatorControls=room.operatorControls!==false;
     await voice.permissionOverwrites.edit(member.id,{ViewChannel:true,Connect:true,Speak:true});
     await guild.channels.cache.get(room.panelChannelId)?.permissionOverwrites.edit(member.id,{ViewChannel:true,ReadMessageHistory:true,SendMessages:false});
   }
@@ -628,8 +630,8 @@ async function handleButton(interaction,client,rooms){
     for(const id of [...(panel?.permissionOverwrites?.cache?.keys()||[])])if(id!==guild.roles.everyone.id&&id!==guild.members.me?.id&&id!==room.ownerId)await panel.permissionOverwrites.delete(id).catch(()=>{});
   }
   else if(action==='sync-perms')await syncPermissions(room,guild,client);
-  else if(action==='toggle-sync')c.syncPermissions=c.syncPermissions===false;
-  else if(action==='toggle-operators')c.panelAccessCanControl=c.panelAccessCanControl===false;
+  else if(action==='toggle-sync')room.syncPermissions=room.syncPermissions===false;
+  else if(action==='toggle-operators')room.operatorControls=room.operatorControls===false;
   else if(action==='rebuild'){room.panelMessageId=null;await refresh(client,room,room.page);return;}
   else if(action==='disconnect-bot'){client.voiceSessions?.get(guild.id)?.connection?.destroy?.();room.ttsConnection?.destroy?.();}
   else if(action==='room-chat')return interaction.reply({content:'Open <#'+room.voiceChannelId+'> to use Discord voice-channel chat and AutoTTS.',ephemeral:true});
@@ -743,7 +745,7 @@ async function recover(client,rooms){
         ownerId:owner,createdAt:channel.createdTimestamp||Date.now(),
         locked:!!voice.permissionOverwrites.cache.get(guild.roles.everyone.id)?.deny.has(PermissionFlagsBits.Connect),
         hidden:!!voice.permissionOverwrites.cache.get(guild.roles.everyone.id)?.deny.has(PermissionFlagsBits.ViewChannel),
-        accessUsers:new Set([owner]),accessRoles:new Set(),bannedUsers:new Set(),page:'overview',ttsBrowser:{kind:null,page:0}
+        accessUsers:new Set([owner]),accessRoles:new Set(),bannedUsers:new Set(),page:'overview',operatorControls:tc(client).panelAccessCanControl !== false,syncPermissions:tc(client).syncPermissions !== false,ttsBrowser:{kind:null,page:0}
       };
       for(const [id,ow] of channel.permissionOverwrites.cache){
         if(id===guild.roles.everyone.id||id===guild.members.me?.id)continue;
