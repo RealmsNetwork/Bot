@@ -54,6 +54,9 @@ function runtimeRoom(i){
 
 async function speak(i,provider,text,extra={}){
   if(!i.deferred&&!i.replied)await i.deferReply({flags:MessageFlags.Ephemeral});
+  const requestedProvider=provider==null||provider===''?undefined:String(provider);
+  const requestedLang=extra.lang==null||extra.lang===''?undefined:String(extra.lang);
+  const requestedVoice=extra.voice==null||extra.voice===''?undefined:String(extra.voice);
   const publicAudio = i.client.modules.get('voice')?.config?.tts?.allowPublicAudio !== false;
   const realRoom = roomFor(i);
   if(!realRoom && !publicAudio)return i.editReply({content:'Public TTS is disabled for this voice channel.'});
@@ -61,10 +64,10 @@ async function speak(i,provider,text,extra={}){
   if(!room)return i.editReply({content:'Join a voice channel first.'});
   if(!publicAudio && !canControlTts(i,room))return i.editReply({content:'Public TTS is disabled for this room.'});
   const canCustomizeVoice=voiceSelectionEnabled(i)&&controlConfigEnabled(i);
-  if((extra.lang!==undefined||extra.voice!==undefined)&&!canCustomizeVoice)
+  if((requestedLang!==undefined||requestedVoice!==undefined)&&!canCustomizeVoice)
     return i.editReply({content:'You do not have permission to override the room TTS voice or language.'});
   try{
-    await tts.speak(i.client,room,text,i.member,{provider,lang:extra.lang,voice:extra.voice});
+    await tts.speak(i.client,room,text,i.member,{provider:requestedProvider,lang:requestedLang,voice:requestedVoice});
     return i.editReply({content:'Speaking now.'});
   }catch(e){
     console.error('[TempVC/TTS] Command:',e?.stack||e);
