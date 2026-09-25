@@ -22,13 +22,7 @@ function roomFor(i){
 }
 
 function canControlTts(i, room) {
-  if (!room) return false;
-  if (room.bannedUsers?.has?.(i.user.id)) return false;
-  const c = i.client.modules.get('voice')?.config?.temporaryVoice || {};
-  if (c.ownerOnlyControl === true || room.operatorControls === false) return room.ownerId === i.user.id;
-  if (room.ownerId === i.user.id) return true;
-  if (room.accessUsers?.has?.(i.user.id)) return true;
-  return [...(room.accessRoles || [])].some(id => i.member?.roles?.cache?.has(id));
+  return tempPanel.canControlTts(i, room, i.client);
 }
 
 function controlConfigEnabled(i) {
