@@ -52,10 +52,11 @@ function timeoutSignal(ms, baseSignal = null) {
   return baseSignal ? AbortSignal.any([baseSignal, timeout]) : timeout;
 }
 
-async function fetchWithTimeout(url, options = {}, timeoutMs = DEFAULT_HTTP_TIMEOUT) {
+async function fetchWithTimeout(url, options = {}, timeoutMs = DEFAULT_HTTP_TIMEOUT, consume = null) {
   const signal = timeoutSignal(timeoutMs, options.signal);
   try {
-    return await fetch(url, { ...options, signal });
+    const response = await fetch(url, { ...options, signal });
+    return typeof consume === 'function' ? await consume(response) : response;
   } catch (e) {
     if (e?.name === 'TimeoutError' || (signal.aborted && signal.reason?.name === 'TimeoutError')) {
       throw new Error('TTS request timed out.');
@@ -161,16 +162,17 @@ async function listVoices(force = false) {
   if (voiceFetchPromise) return voiceFetchPromise;
   voiceFetchPromise = (async () => {
     const url = VOICE_LIST_URL + '&Sec-MS-GEC=' + secMsGec() + '&Sec-MS-GEC-Version=1-' + CHROMIUM_FULL_VERSION;
-    const r = await fetchWithTimeout(url, {
+    const data = JSON.parse((await fetchWithTimeout(url, {
       headers: {
         Accept: '*/*',
         'Accept-Language': 'en-US,en;q=0.9',
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/' +
           CHROMIUM_FULL_VERSION.split('.')[0] + '.0.0.0 Safari/537.36 Edg/' + CHROMIUM_FULL_VERSION.split('.')[0] + '.0.0.0'
       }
-    });
-    if (!r.ok) throw new Error('Edge voices API HTTP ' + r.status);
-    const data = JSON.parse((await readResponseBuffer(r)).toString('utf8'));
+    }, DEFAULT_HTTP_TIMEOUT, async response => {
+      if (!response.ok) throw new Error('Edge voices API HTTP ' + response.status);
+      return readResponseBuffer(response, MAX_JSON_BYTES);
+    })).toString('utf8'));
     cache.voices = Array.isArray(data) ? data.filter(v => v?.ShortName || v?.Name) : [];
     cache.at = Date.now();
     return cache.voices;
@@ -200,9 +202,10 @@ async function listLanguages(force = false) {
   if (!force && languageCache.values.length && Date.now() - languageCache.at < 21600000) return languageCache.values;
   if (languageFetchPromise) return languageFetchPromise;
   languageFetchPromise = (async () => {
-    const r = await fetchWithTimeout(GOOGLE_LANG_URL, { headers: { 'user-agent': 'RealmsNetwork-Bot/0.2', accept: 'application/json,*/*' } });
-    if (!r.ok) throw new Error('Google language API HTTP ' + r.status);
-    const data = JSON.parse((await readResponseBuffer(r)).toString('utf8'));
+    const data = JSON.parse((await fetchWithTimeout(GOOGLE_LANG_URL, { headers: { 'user-agent': 'RealmsNetwork-Bot/0.2', accept: 'application/json,*/*' } }, DEFAULT_HTTP_TIMEOUT, async response => {
+      if (!response.ok) throw new Error('Google language API HTTP ' + response.status);
+      return readResponseBuffer(response, MAX_JSON_BYTES);
+    })).toString('utf8'));
     languageCache.values = Object.entries(data || {})
       .map(([code, name]) => ({ code: String(code), name: String(name) }))
       .filter(x => x.code && x.name)
@@ -264,9 +267,10 @@ async function synthesizeEdge(text, file, settings = {}) {
 }
 
 async function remoteStream(url, timeoutMs = DEFAULT_HTTP_TIMEOUT, maxBytes = MAX_REMOTE_BYTES) {
-  const r = await fetchWithTimeout(url, { headers: { 'user-agent': 'RealmsNetwork-Bot/0.2', accept: 'audio/*,*/*;q=0.1' } }, timeoutMs);
-  if (!r.ok) throw new Error('TTS API HTTP ' + r.status);
-  const audio = await readRemoteAudio(r, maxBytes);
+  const audio = await fetchWithTimeout(url, { headers: { 'user-agent': 'RealmsNetwork-Bot/0.2', accept: 'audio/*,*/*;q=0.1' } }, timeoutMs, async response => {
+    if (!response.ok) throw new Error('TTS API HTTP ' + response.status);
+    return readRemoteAudio(response, maxBytes);
+  });
   console.info('[TempVC/TTS] Remote audio SHA-256:', shortHash(audio.sha256), 'bytes:', audio.buffer.length);
   return Readable.from(audio.buffer);
 }
