@@ -490,7 +490,7 @@ function buildPayload(client, room, extras = {}) {
       '### Text To Speech',
       '**Enabled:** ' + (s.enabled ? 'Yes' : 'No'),
       '**Auto TTS:** ' + (s.autoTts ? 'Enabled' : 'Disabled'),
-      '**Type:** ' + s.provider,
+      '**Voice style:** ' + ({edge:'Natural',google:'Classic',polly:'Alternate'}[s.provider] || 'Default'),
       '**Language:** ' + s.lang,
       '**Voice:** ' + s.voice,
       '**Rate:** ' + s.rate + '%',
@@ -596,7 +596,6 @@ function buildPayload(client, room, extras = {}) {
     rows.push(
       new ActionRowBuilder().addComponents(
         button('refresh','Refresh'),
-        button('refresh','Refresh'),
         button('invite','Create Invite',ButtonStyle.Success),
         button('sync-perms','Update Permissions'),
         button('tts-stop','Stop TTS',ButtonStyle.Danger)
@@ -630,7 +629,7 @@ function buildPayload(client, room, extras = {}) {
 
 async function refresh(client, room, page = room.page || 'overview') {
   normalizeRoom(room,client);
-  if(room.permissionsDirty)throw new Error('Temporary VC permissions are out of sync. Synchronize permissions before refreshing the panel.');
+  if(room.permissionsDirty)throw new Error('Room access needs updating. Try again.');
   if (!(await persistRoom(client,room))) throw new Error('Temporary VC state could not be persisted. The change was not safely confirmed.');
   room.page=page;
   const guild=client.guilds.cache.get(room.guildId);
@@ -863,9 +862,9 @@ async function revoke(room,guild,id,type,client){
 
 async function showForm(interaction,kind){
   const titles={rename:'Rename Room',limit:'User Limit',bitrate:'Voice Bitrate',region:'Voice Region',slowmode:'Chat Slowmode',rate:'TTS Rate',volume:'TTS Volume',speak:'Speak With TTS','tts-voice-manual':'Set TTS Voice'};
-  const labels={rename:'New room name',limit:'0 = unlimited, 1-99 = limit',bitrate:'Bitrate in kbps',region:'Discord RTC region, blank = automatic',slowmode:'Slowmode seconds, 0-21600',rate:'Speech rate, 50-150',volume:'TTS volume, 0-150',speak:'Text to speak','tts-voice-manual':'Edge or Polly voice name'};
+  const labels={rename:'New room name',limit:'0 = unlimited, 1-99 = limit',bitrate:'Bitrate in kbps',region:'Discord RTC region, blank = automatic',slowmode:'Slowmode seconds, 0-21600',rate:'Speech rate, 50-150',volume:'TTS volume, 0-150',speak:'Text to speak','tts-voice-manual':'Voice name'};
   const max={rename:100,limit:3,bitrate:5,region:32,slowmode:5,rate:3,volume:3,speak:500,'tts-voice-manual':100}[kind]||100;
-  const modal=new ModalBuilder().setCustomId('rn-tvc-modal:'+kind).setTitle(titles[kind]||'Temporary VC');
+  const modal=new ModalBuilder().setCustomId('rn-tvc-modal:'+kind).setTitle(titles[kind]||'Voice Room');
   modal.addComponents(new ActionRowBuilder().addComponents(
     new TextInputBuilder().setCustomId('value').setLabel(labels[kind]||'Value').setStyle(kind==='speak'?TextInputStyle.Paragraph:TextInputStyle.Short).setRequired(kind!=='region').setMaxLength(max)
   ));
@@ -1102,7 +1101,7 @@ async function handleSelect(interaction,client,rooms){
   if(kind==='page')return panelUpdate(interaction,client,room,value);
   if(!canControl(interaction,room,client,kind))return panelNotice(interaction,'Only the room owner can use that selection.');
   if(kind==='tts-provider'){
-    if(!['edge','google','polly'].includes(value))return panelNotice(interaction,'That TTS provider is not supported.');
+    if(!['edge','google','polly'].includes(value))return panelNotice(interaction,'That voice style is not available.');
     room.tts.provider=value;
     return panelUpdate(interaction,client,room,'tts');
   }
