@@ -40,25 +40,23 @@ function sha256(value) {
 }
 
 function shortHash(value) {
-  return sha256(value).slice(0, 16);
+  return String(value || '').slice(0, 16);
 }
 
-function timeoutSignal(ms) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), Math.max(1000, Number(ms) || DEFAULT_HTTP_TIMEOUT));
-  timer.unref?.();
-  return { signal: controller.signal, cleanup: () => clearTimeout(timer) };
+function timeoutSignal(ms, baseSignal = null) {
+  const timeout = AbortSignal.timeout(Math.max(1000, Number(ms) || DEFAULT_HTTP_TIMEOUT));
+  return baseSignal ? AbortSignal.any([baseSignal, timeout]) : timeout;
 }
 
 async function fetchWithTimeout(url, options = {}, timeoutMs = DEFAULT_HTTP_TIMEOUT) {
-  const { signal, cleanup } = timeoutSignal(timeoutMs);
+  const signal = timeoutSignal(timeoutMs, options.signal);
   try {
     return await fetch(url, { ...options, signal });
   } catch (e) {
-    if (e?.name === 'AbortError') throw new Error('TTS request timed out.');
+    if (e?.name === 'TimeoutError' || (signal.aborted && signal.reason?.name === 'TimeoutError')) {
+      throw new Error('TTS request timed out.');
+    }
     throw e;
-  } finally {
-    cleanup();
   }
 }
 
@@ -72,17 +70,17 @@ async function hashFile(file) {
   });
 }
 
-async function validateAudioFile(file) {
+async function validateAudioFile(file, maxBytes = MAX_AUDIO_BYTES) {
   const stat = await fs.promises.stat(file);
   if (!stat.isFile() || stat.size <= 0) throw new Error('TTS provider returned an empty audio file.');
-  if (stat.size > MAX_AUDIO_BYTES) throw new Error('TTS audio response exceeded the safety size limit.');
+  if (stat.size > maxBytes) throw new Error('TTS audio response exceeded the safety size limit.');
   return { size: stat.size, sha256: await hashFile(file) };
 }
 
-async function readRemoteAudio(response) {
+async function readRemoteAudio(response, maxBytes = MAX_REMOTE_BYTES) {
   const type = String(response.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
   const length = Number(response.headers.get('content-length') || 0);
-  if (length > MAX_REMOTE_BYTES) throw new Error('TTS audio response exceeded the safety size limit.');
+  if (Number.isFinite(length) && length > maxBytes) throw new Error('TTS audio response exceeded the safety size limit.');
   if (type && !ALLOWED_AUDIO_TYPES.has(type)) throw new Error('TTS provider returned an unexpected content type.');
   const chunks = [];
   let total = 0;
@@ -93,9 +91,12 @@ async function readRemoteAudio(response) {
       const { value, done } = await reader.read();
       if (done) break;
       total += value.byteLength;
-      if (total > MAX_REMOTE_BYTES) throw new Error('TTS audio response exceeded the safety size limit.');
+      if (total > maxBytes) throw new Error('TTS audio response exceeded the safety size limit.');
       chunks.push(Buffer.from(value));
     }
+  } catch (e) {
+    await reader.cancel().catch(() => {});
+    throw e;
   } finally {
     reader.releaseLock?.();
   }
@@ -175,16 +176,16 @@ async function synthesizeEdge(text, file, settings = {}) {
     rate: rateValue(settings.rate),
     pitch: settings.pitch || 'default',
     volume: volumeValue(settings.volume),
-    timeout: Math.max(5000, Number(settings.timeout || 15000))
+    timeout: Math.max(5000, Number(settings.timeoutMs ?? settings.timeout ?? DEFAULT_HTTP_TIMEOUT))
   });
   await tts.ttsPromise(String(text), file);
   return file;
 }
 
-async function remoteStream(url, timeoutMs = DEFAULT_HTTP_TIMEOUT) {
+async function remoteStream(url, timeoutMs = DEFAULT_HTTP_TIMEOUT, maxBytes = MAX_REMOTE_BYTES) {
   const r = await fetchWithTimeout(url, { headers: { 'user-agent': 'RealmsNetwork-Bot/0.2', accept: 'audio/*,*/*;q=0.1' } }, timeoutMs);
   if (!r.ok) throw new Error('TTS API HTTP ' + r.status);
-  const audio = await readRemoteAudio(r);
+  const audio = await readRemoteAudio(r, maxBytes);
   console.info('[TempVC/TTS] Remote audio SHA-256:', shortHash(audio.sha256), 'bytes:', audio.buffer.length);
   return Readable.from(audio.buffer);
 }
@@ -192,6 +193,8 @@ async function remoteStream(url, timeoutMs = DEFAULT_HTTP_TIMEOUT) {
 async function setBotMute(client,room,mute){try{const guild=client.guilds.cache.get(room.guildId);const me=await guild?.members.fetchMe().catch(()=>guild?.members.me);if(!me?.voice?.channelId||me.voice.channelId!==room.voiceChannelId)return false;if(me.voice.serverMute!==mute)await me.voice.setMute(mute,'Room TTS '+(mute?'idle':'speaking'));return true;}catch(e){console.error('[TempVC/TTS] Bot mute:',e?.message||e);return false;}}
 
 function ensurePlayer(room,client) {
+  if (!Array.isArray(room.ttsQueue)) room.ttsQueue = [];
+  if (room.ttsPlaying === undefined) room.ttsPlaying = false;
   if (room.ttsPlayer) return room.ttsPlayer;
   room.ttsPlayer = createAudioPlayer();
   room.ttsQueue = [];
@@ -209,25 +212,72 @@ function ensurePlayer(room,client) {
 }
 
 async function ensureConnection(client, room) {
-  const guild = client.guilds.cache.get(room.guildId);
-  const channel = guild?.channels.cache.get(room.voiceChannelId);
-  if (!guild || !channel) throw new Error('Temporary voice room no longer exists.');
-  let connection = client.voiceSessions?.get(guild.id)?.connection || room.ttsConnection;
-  if (connection?.joinConfig?.channelId !== channel.id) {
-    if (connection) connection.destroy();
-    connection = joinVoiceChannel({
-      channelId: channel.id,
-      guildId: guild.id,
-      adapterCreator: guild.voiceAdapterCreator,
-      selfDeaf: true,
-      selfMute: false
-    });
-    await entersState(connection, VoiceConnectionStatus.Ready, 15000);
-    const session = client.voiceSessions?.get(guild.id);
-    if (session) session.connection = connection;
+  if (room.ttsConnectionPromise) return room.ttsConnectionPromise;
+  room.ttsConnectionPromise = (async () => {
+    const guild = client.guilds.cache.get(room.guildId);
+    const channel = guild?.channels.cache.get(room.voiceChannelId);
+    if (!guild || !channel) throw new Error('Temporary voice room no longer exists.');
+
+    let connection = client.voiceSessions?.get(guild.id)?.connection || room.ttsConnection;
+    if (connection?.joinConfig?.channelId !== channel.id) {
+      connection?.destroy?.();
+      connection = null;
+    }
+
+    if (connection) {
+      const state = connection.state.status;
+      if (state === VoiceConnectionStatus.Destroyed) {
+        connection = null;
+      } else if (state === VoiceConnectionStatus.Disconnected) {
+        const rejoined = connection.rejoin();
+        if (rejoined) {
+          try {
+            await entersState(connection, VoiceConnectionStatus.Ready, 15000);
+          } catch {
+            connection.destroy();
+            connection = null;
+          }
+        } else {
+          connection.destroy();
+          connection = null;
+        }
+      } else if (state !== VoiceConnectionStatus.Ready) {
+        try {
+          await entersState(connection, VoiceConnectionStatus.Ready, 15000);
+        } catch {
+          connection.destroy();
+          connection = null;
+        }
+      }
+    }
+
+    if (!connection) {
+      connection = joinVoiceChannel({
+        channelId: channel.id,
+        guildId: guild.id,
+        adapterCreator: guild.voiceAdapterCreator,
+        selfDeaf: true,
+        selfMute: false
+      });
+      try {
+        await entersState(connection, VoiceConnectionStatus.Ready, 15000);
+      } catch (e) {
+        connection.destroy();
+        throw e;
+      }
+      const session = client.voiceSessions?.get(guild.id);
+      if (session) session.connection = connection;
+    }
+
+    room.ttsConnection = connection;
+    return connection;
+  })();
+
+  try {
+    return await room.ttsConnectionPromise;
+  } finally {
+    room.ttsConnectionPromise = null;
   }
-  room.ttsConnection = connection;
-  return connection;
 }
 
 function settingsFor(room, client) {
@@ -240,6 +290,9 @@ function settingsFor(room, client) {
   room.tts.rate = Math.max(50, Math.min(Number(c.maxRate || 150), Number(room.tts.rate)));
   if (!Number.isFinite(Number(room.tts.volume))) room.tts.volume = Number(c.maxVolume || 100);
   room.tts.volume = Math.max(0, Math.min(Number(c.maxVolume || 150), Number(room.tts.volume)));
+  room.tts.timeoutMs = Math.max(1000, Math.min(120000, Number(c.timeoutMs || DEFAULT_HTTP_TIMEOUT)));
+  room.tts.maxAudioBytes = Math.max(64 * 1024, Math.min(32 * 1024 * 1024, Number(c.maxAudioBytes || MAX_AUDIO_BYTES)));
+  room.tts.maxRemoteBytes = Math.max(64 * 1024, Math.min(32 * 1024 * 1024, Number(c.maxRemoteBytes || MAX_REMOTE_BYTES)));
   if (room.tts.enabled === undefined) room.tts.enabled = c.enabled !== false;
   if (room.tts.autoTts === undefined) room.tts.autoTts = false;
   if (room.tts.prefixName === undefined) room.tts.prefixName = true;
@@ -252,6 +305,7 @@ async function playNext(room,client) {
     return;
   }
   const item = room.ttsQueue[0];
+  const generation = room.ttsGeneration || 0;
   try {
     let resource;
     let file = null;
@@ -260,22 +314,32 @@ async function playNext(room,client) {
       await fs.promises.mkdir(dir, { recursive: true });
       file = path.join(dir, room.guildId + '-' + room.voiceChannelId + '-' + Date.now() + '-' + Math.random().toString(36).slice(2) + '.mp3');
       await synthesizeEdge(item.text, file, item.settings);
-      const verified = await validateAudioFile(file);
+      const verified = await validateAudioFile(file, item.settings.maxAudioBytes);
       console.info('[TempVC/TTS] Edge audio SHA-256:', shortHash(verified.sha256), 'bytes:', verified.size);
       resource = createAudioResource(file, { inputType: StreamType.Arbitrary });
     } else if (item.settings.provider === 'google') {
       const text = encodeURIComponent(item.text.slice(0, 200));
       const lang = encodeURIComponent(item.settings.lang || 'en');
-      resource = createAudioResource(await remoteStream(GOOGLE_TTS_URL + '?ie=UTF-8&q=' + text + '&tl=' + lang + '&client=tw-ob'), { inputType: StreamType.Arbitrary });
+      resource = createAudioResource(await remoteStream(GOOGLE_TTS_URL + '?ie=UTF-8&q=' + text + '&tl=' + lang + '&client=tw-ob', item.settings.timeoutMs, item.settings.maxRemoteBytes), { inputType: StreamType.Arbitrary });
     } else if (item.settings.provider === 'polly') {
-      resource = createAudioResource(await remoteStream(POLLY_TTS_URL + '?voice=' + encodeURIComponent(item.settings.voice || 'Brian') + '&text=' + encodeURIComponent(item.text.slice(0, 200))), { inputType: StreamType.Arbitrary });
+      resource = createAudioResource(await remoteStream(POLLY_TTS_URL + '?voice=' + encodeURIComponent(item.settings.voice || 'Brian') + '&text=' + encodeURIComponent(item.text.slice(0, 200)), item.settings.timeoutMs, item.settings.maxRemoteBytes), { inputType: StreamType.Arbitrary });
     } else {
       throw new Error('Unsupported TTS provider: ' + item.settings.provider);
     }
-    if (!room.ttsConnection || room.ttsConnection.state.status === VoiceConnectionStatus.Destroyed) {
+    if (generation !== (room.ttsGeneration || 0) || !room.ttsQueue?.length || room.ttsQueue[0] !== item) {
+      if (file) await fs.promises.rm(file, { force: true }).catch(() => {});
+      room.ttsPlaying = false;
+      return;
+    }
+    if (!room.ttsConnection || room.ttsConnection.state.status !== VoiceConnectionStatus.Ready) {
       await ensureConnection(client, room);
     }
-    if (!room.ttsConnection || room.ttsConnection.state.status === VoiceConnectionStatus.Destroyed) throw new Error('Voice connection is unavailable.');
+    if (generation !== (room.ttsGeneration || 0) || !room.ttsQueue?.length || room.ttsQueue[0] !== item) {
+      if (file) await fs.promises.rm(file, { force: true }).catch(() => {});
+      room.ttsPlaying = false;
+      return;
+    }
+    if (!room.ttsConnection || room.ttsConnection.state.status !== VoiceConnectionStatus.Ready) throw new Error('Voice connection is unavailable.');
     ensurePlayer(room,client);
     await setBotMute(client,room,false);
     room.ttsConnection.subscribe(room.ttsPlayer);
@@ -293,6 +357,14 @@ async function playNext(room,client) {
   room.ttsQueue.shift();
 }
 
+async function pump(room, client) {
+  if (room.ttsPump) return room.ttsPump;
+  room.ttsPump = playNext(room, client).finally(() => {
+    room.ttsPump = null;
+  });
+  return room.ttsPump;
+}
+
 async function speak(client, room, text, member) {
   const settings = { ...settingsFor(room, client) };
   if (settings.enabled === false) throw new Error('TTS is disabled for this room.');
@@ -306,12 +378,13 @@ async function speak(client, room, text, member) {
   if (!room.guildId || !room.voiceChannelId) throw new Error('Invalid temporary voice room state.');
   await ensureConnection(client, room);
   ensurePlayer(room,client);
-  room.ttsQueue.push({ text: phrase, settings, requestedAt: Date.now(), requestHash: shortHash(JSON.stringify({ phrase, settings })) });
-  if (!room.ttsPlaying) await playNext(room,client);
+  room.ttsQueue.push({ text: phrase, settings, requestedAt: Date.now(), requestHash: shortHash(sha256(JSON.stringify({ phrase, settings }))) });
+  if (!room.ttsPlaying) await pump(room,client);
 }
 
 async function stop(room,client) {
   if (!room) return false;
+  room.ttsGeneration = (room.ttsGeneration || 0) + 1;
   room.ttsQueue = [];
   room.ttsPlaying = false;
   room.ttsPlayer?.stop(true);
