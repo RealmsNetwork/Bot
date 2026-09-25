@@ -1063,8 +1063,9 @@ async function handleModal(interaction,client,rooms){
       }
     }else throw new Error('Unknown panel form.');
     room.page=kind==='speak'?'tts':'room';
-    await interaction.editReply({content:'Updated.'});
+    if(!(await persistRoom(client,room)))throw new Error('The change could not be durably saved. Please try again.');
     await refresh(client,room,room.page);
+    return interaction.editReply({content:'Updated.'});
   }catch(e){return interaction.editReply({content:'Could not update: '+(e?.message||e)}).catch(()=>{});}
 }
 
