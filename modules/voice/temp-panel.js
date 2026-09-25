@@ -1063,6 +1063,8 @@ async function recover(client,rooms){
         page:'overview',
         operatorControls:hasSavedState?saved.operatorControls!==false:tc(client).ownerOnlyControl !== true && tc(client).panelAccessCanControl !== false,
         syncPermissions:hasSavedState?saved.syncPermissions!==false:tc(client).syncPermissions !== false,
+        emptySince:hasSavedState&&Number.isFinite(Number(saved.emptySince))?Number(saved.emptySince):(voice.members.size===0?Date.now():null),
+        recoveryGraceUntil:voice.members.size===0?Date.now()+recoveryGraceMs(client):0,
         tts:hasSavedState&&saved.tts&&typeof saved.tts==='object'?saved.tts:{},
         ttsBrowser:{kind:null,page:0}
       };
@@ -1110,7 +1112,19 @@ async function cleanup(client,rooms){
       await panel?.delete('Temporary VC voice channel missing').catch(()=>{});
       continue;
     }
-    if(voice.members.size===0)await deleteRoom(client,rooms,room,guild,'Temporary voice room empty');
+    if(voice.members.size===0){
+      const now=Date.now();
+      if(!room.emptySince){
+        room.emptySince=now;
+        await persistRoom(client,room);
+      }
+      if(Number(room.recoveryGraceUntil)>now)continue;
+      if(now-Number(room.emptySince)>=emptyGraceMs(client))await deleteRoom(client,rooms,room,guild,'Temporary voice room empty');
+    }else if(room.emptySince){
+      room.emptySince=null;
+      room.recoveryGraceUntil=0;
+      await persistRoom(client,room);
+    }
   }
 }
 
