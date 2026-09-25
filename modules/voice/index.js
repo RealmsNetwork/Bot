@@ -106,9 +106,6 @@ const listeners=[
       room.recoveryGraceUntil=0;
       await tempPanel.persistRoom(client,room).catch(()=>{});
     }
-    if(oldState.channel?.members.size===0&&c.autoDeleteEmpty!==false){
-      // Cleanup owns deletion so restart recovery can apply its grace period first.
-    }
   }
 }}
 ];
