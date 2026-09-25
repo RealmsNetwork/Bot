@@ -9,6 +9,7 @@ const sessions=new Map();
 const tempRooms=new Map();
 const creatingTempRooms=new Set();
 function cfg(client){return client.modules.get('voice')?.config||{};}
+function edgePercent(value,neutral=100){const n=Number(value);if(!Number.isFinite(n)||n===neutral)return 'default';const delta=n-neutral;return (delta>=0?'+':'')+delta+'%';}
 function brand(client){const b=client.config.branding||{};return{server:b.serverName||'RealmsNetwork',bot:b.botName||'RealmsNetwork Bot',color:b.embedColor||'#8b5cf6',footer:b.footer||b.serverName||'RealmsNetwork'};}
 function embed(client,title,description){const b=brand(client);return new EmbedBuilder().setColor(b.color).setTitle(title).setDescription(description).setFooter({text:b.footer}).setTimestamp();}
 function session(guildId){if(!sessions.has(guildId))sessions.set(guildId,{connection:null,player:createAudioPlayer(),queue:[],current:null,textChannelId:null,volume:100});return sessions.get(guildId);}
@@ -24,13 +25,46 @@ const commands=[
 {data:new SlashCommandBuilder().setName('queue').setDescription('Show the music queue'),execute:async(i,client)=>{const s=sessions.get(i.guildId);return i.reply({embeds:[embed(client,'Music Queue',s?.queue?.length?s.queue.map((x,n)=>`${n+1}. **${x.title}**`).join('\n'):'The queue is empty.')]});}},
 {data:new SlashCommandBuilder().setName('volume').setDescription('Set music volume').addIntegerOption(o=>o.setName('percent').setDescription('0-150').setRequired(true).setMinValue(0).setMaxValue(150)),execute:async(i,client)=>{const s=sessions.get(i.guildId);if(!s)return i.reply({content:'Nothing is playing.',ephemeral:true});const max=cfg(client).music.maxVolume||150;s.volume=Math.min(i.options.getInteger('percent',true),max);return i.reply(`Volume set to **${s.volume}%**.`);}},
 {data:new SlashCommandBuilder().setName('nowplaying').setDescription('Show the current track'),execute:async(i,client)=>{const s=sessions.get(i.guildId);return i.reply({embeds:[embed(client,'Now Playing',s?.current?`**${s.current.title}**\n${s.current.url}`:'Nothing is playing.')]});}},
-{data:new SlashCommandBuilder().setName('tts').setDescription('Speak text in your voice channel').addStringOption(o=>o.setName('text').setDescription('Text to speak').setRequired(true)),execute:async(i,client)=>{const baseTts=cfg(client).tts||{};const room=client.voiceRooms?.get(i.member.voice.channelId);const c=room?{...baseTts,...(room.tts||{})}:baseTts;if(c.enabled===false)return i.reply({content:'TTS is disabled.',ephemeral:true});if(!i.member.voice.channel)return i.reply({content:'Join a voice channel first.',ephemeral:true});const text=i.options.getString('text',true).slice(0,c.maxCharacters||500);await i.deferReply({ephemeral:true});try{const dir=path.join(__dirname,'../../data/tts');fs.mkdirSync(dir,{recursive:true});const file=path.join(dir,`${i.guildId}-${i.user.id}-${Date.now()}.mp3`);const tts=new EdgeTTS({voice:c.voice||c.defaultVoice||'en-US-AriaNeural',lang:c.language||c.defaultLanguage||'en-US',rate:c.rate!=null?c.rate:c.maxRate||100,volume:c.volume!=null?c.volume:c.maxVolume||100});await tts.ttsPromise(text,file);const s=await connect(i.member);ensurePlayerHooks(i.guildId,client);s.player.play(createAudioResource(file,{inlineVolume:true}));s.textChannelId=i.channelId;setTimeout(()=>fs.rm(file,{force:true},()=>{}),120000);return i.editReply('Speaking now.');}catch(e){return i.editReply(`TTS failed: ${e.message}`);}}},
+{data:new SlashCommandBuilder().setName('tts').setDescription('Speak text in your voice channel').addStringOption(o=>o.setName('text').setDescription('Text to speak').setRequired(true)),execute:async(i,client)=>{const baseTts=cfg(client).tts||{};const room=client.voiceRooms?.get(i.member.voice.channelId);const c=room?{...baseTts,...(room.tts||{})}:baseTts;if(c.enabled===false)return i.reply({content:'TTS is disabled.',ephemeral:true});if(!i.member.voice.channel)return i.reply({content:'Join a voice channel first.',ephemeral:true});const text=i.options.getString('text',true).slice(0,c.maxCharacters||500);await i.deferReply({ephemeral:true});try{const dir=path.join(__dirname,'../../data/tts');fs.mkdirSync(dir,{recursive:true});const file=path.join(dir,`${i.guildId}-${i.user.id}-${Date.now()}.mp3`);const tts=new EdgeTTS({voice:c.voice||c.defaultVoice||'en-US-AriaNeural',lang:c.language||c.defaultLanguage||'en-US',rate:edgePercent(c.rate!=null?c.rate:c.maxRate||100),volume:edgePercent(c.volume!=null?c.volume:c.maxVolume||100)});await tts.ttsPromise(text,file);const s=await connect(i.member);ensurePlayerHooks(i.guildId,client);s.player.play(createAudioResource(file,{inlineVolume:true}));s.textChannelId=i.channelId;setTimeout(()=>fs.rm(file,{force:true},()=>{}),120000);return i.editReply('Speaking now.');}catch(e){return i.editReply(`TTS failed: ${e.message}`);}}},
 {data:new SlashCommandBuilder().setName('vcpanel').setDescription('Open your temporary voice room control panel'),execute:async(i)=>{const room=ownerOf(i.member.voice.channelId);if(!room)return i.reply({content:'You are not in a temporary voice room.',ephemeral:true});if(!room.panelChannelId)return i.reply({content:'This room does not have a control panel.',ephemeral:true});return i.reply({content:'Your temporary room panel is <#'+room.panelChannelId+'>.',ephemeral:true});}}
 ];
 const listeners=[
 {event:'interactionCreate',handle:async(interaction,client)=>{if(interaction.customId?.startsWith('rn-tvc:'))return tempPanel.handle(interaction,client,tempRooms);}},
 {event:'channelUpdate',handle:async(oldChannel,newChannel,client)=>{if(newChannel?.type===ChannelType.GuildVoice)await tempPanel.channelUpdate(oldChannel,newChannel,client,tempRooms);}},
-{event:'voiceStateUpdate',handle:async(oldState,newState,client)=>{const c=cfg(client).temporaryVoice||{};if(newState.channelId&&tempRooms.has(newState.channelId)&&newState.member&&!newState.member.user.bot){const room=tempRooms.get(newState.channelId);if(room?.bannedUsers?.has(newState.member.id)){await newState.member.voice.disconnect('Banned from temporary voice room').catch(()=>{});return;}}if(c.enabled&&newState.channelId===String(c.triggerChannelId||'')&&newState.member&&!newState.member.user.bot&&!creatingTempRooms.has(newState.member.id)){creatingTempRooms.add(newState.member.id);try{await createTempRoom(newState.member,client);}catch(e){console.error(`[TempVC] Failed to create room for ${newState.member.user.tag}: ${e?.stack||e?.message||e}`);}finally{creatingTempRooms.delete(newState.member.id);}}if(oldState.channelId&&tempRooms.has(oldState.channelId)){const room=tempRooms.get(oldState.channelId);if(room&&room.ownerId===oldState.member?.id&&newState.channelId!==oldState.channelId&&c.autoTransferOnOwnerLeave!==false&&oldState.channel?.members?.size>0){const next=[...oldState.channel.members.values()].sort((a,b)=>(a.joinedTimestamp||0)-(b.joinedTimestamp||0))[0];if(next){room.ownerId=next.id;room.accessUsers?.add(next.id);room.controlUsers?.add(next.id);await oldState.guild.channels.cache.get(room.voiceChannelId)?.permissionOverwrites.edit(next.id,{Connect:true,Speak:true,ViewChannel:true}).catch(()=>{});await oldState.guild.channels.cache.get(room.panelChannelId)?.permissionOverwrites.edit(next.id,{ViewChannel:true,ReadMessageHistory:true,SendMessages:false}).catch(()=>{});await tempPanel.refresh(client,room,'overview').catch(()=>{});}}if(oldState.channel?.members.size===0&&c.autoDeleteEmpty!==false){const id=oldState.channelId;await tempPanel.deleteRoom(client,tempRooms,room,oldState.guild,'Temporary voice room empty').catch(e=>console.error(`[TempVC] Failed to delete ${id}: ${e?.message||e}`));}}}
+{event:'voiceStateUpdate',handle:async(oldState,newState,client)=>{
+  const c=cfg(client).temporaryVoice||{};
+  if(newState.channelId&&tempRooms.has(newState.channelId)&&newState.member&&!newState.member.user.bot){
+    const room=tempRooms.get(newState.channelId);
+    if(room?.bannedUsers?.has(newState.member.id)){
+      await newState.member.voice.disconnect('Banned from temporary voice room').catch(()=>{});
+      return;
+    }
+  }
+  if(c.enabled&&newState.channelId===String(c.triggerChannelId||'')&&newState.member&&!newState.member.user.bot&&!creatingTempRooms.has(newState.member.id)){
+    creatingTempRooms.add(newState.member.id);
+    try{await createTempRoom(newState.member,client);}
+    catch(e){console.error(`[TempVC] Failed to create room for ${newState.member.user.tag}: ${e?.stack||e?.message||e}`);}
+    finally{creatingTempRooms.delete(newState.member.id);}
+  }
+  if(oldState.channelId&&tempRooms.has(oldState.channelId)){
+    const room=tempRooms.get(oldState.channelId);
+    if(room&&room.ownerId===oldState.member?.id&&newState.channelId!==oldState.channelId&&c.autoTransferOnOwnerLeave!==false&&oldState.channel?.members?.size>0){
+      const next=[...oldState.channel.members.values()].sort((a,b)=>(a.joinedTimestamp||0)-(b.joinedTimestamp||0))[0];
+      if(next){
+        room.ownerId=next.id;
+        room.accessUsers?.add(next.id);
+        room.controlUsers?.add(next.id);
+        await oldState.guild.channels.cache.get(room.voiceChannelId)?.permissionOverwrites.edit(next.id,{Connect:true,Speak:true,ViewChannel:true}).catch(()=>{});
+        await oldState.guild.channels.cache.get(room.panelChannelId)?.permissionOverwrites.edit(next.id,{ViewChannel:true,ReadMessageHistory:true,SendMessages:false}).catch(()=>{});
+        await tempPanel.refresh(client,room,'overview').catch(()=>{});
+      }
+    }
+    if(oldState.channel?.members.size===0&&c.autoDeleteEmpty!==false){
+      const id=oldState.channelId;
+      await tempPanel.deleteRoom(client,tempRooms,room,oldState.guild,'Temporary voice room empty').catch(e=>console.error(`[TempVC] Failed to delete ${id}: ${e?.message||e}`));
+    }
+  }
+}}
 ];
 const extra=[
 {data:new SlashCommandBuilder().setName('vcname').setDescription('Rename your temporary voice room').addStringOption(o=>o.setName('name').setDescription('New name').setRequired(true)),execute:async(i,client)=>{const room=ownerOf(i.member.voice.channelId);if(!room||room.ownerId!==i.user.id)return i.reply({content:'You do not own this room.',ephemeral:true});const name=i.options.getString('name',true).slice(0,100);await i.member.voice.channel.setName(name);await tempPanel.channelUpdate({name:''},i.member.voice.channel,client,tempRooms).catch(()=>{});return i.reply({content:'Room renamed.',ephemeral:true});}},
