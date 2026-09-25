@@ -24,6 +24,7 @@ const languageCache = { at: 0, values: [] };
 let voiceFetchPromise = null;
 let languageFetchPromise = null;
 const MAX_JSON_BYTES = 2 * 1024 * 1024;
+const SUPPORTED_PROVIDERS = new Set(['edge','google','polly']);
 const MAX_AUDIO_BYTES = 8 * 1024 * 1024;
 const MAX_REMOTE_BYTES = 8 * 1024 * 1024;
 const DEFAULT_HTTP_TIMEOUT = 15000;
@@ -145,6 +146,7 @@ async function readRemoteAudio(response, maxBytes = MAX_REMOTE_BYTES) {
   }
   const buffer = Buffer.concat(chunks);
   if (!buffer.length) throw new Error('TTS provider returned an empty audio response.');
+  if (!hasAudioSignature(buffer.subarray(0, 32))) throw new Error('TTS provider returned invalid audio data.');
   return { buffer, type, sha256: sha256(buffer) };
 }
 
@@ -372,7 +374,7 @@ function finiteConfigNumber(value, fallback, min, max) {
 function settingsFor(room, client) {
   const c = client.modules.get('voice')?.config?.tts || {};
   room.tts = room.tts && typeof room.tts === 'object' ? room.tts : {};
-  if (!room.tts.provider) room.tts.provider = c.provider || 'edge';
+  if (!SUPPORTED_PROVIDERS.has(room.tts.provider)) room.tts.provider = SUPPORTED_PROVIDERS.has(c.provider) ? c.provider : 'edge';
   if (!room.tts.voice) room.tts.voice = c.defaultVoice || 'en-US-AriaNeural';
   if (!room.tts.lang) room.tts.lang = c.defaultLanguage || 'en-US';
 
@@ -468,8 +470,12 @@ async function pump(room, client) {
   return room.ttsPump;
 }
 
-async function speak(client, room, text, member) {
+async function speak(client, room, text, member, overrides = {}) {
   const settings = { ...settingsFor(room, client) };
+  if (overrides.provider !== undefined) settings.provider = String(overrides.provider).toLowerCase();
+  if (overrides.lang !== undefined) settings.lang = String(overrides.lang);
+  if (overrides.voice !== undefined) settings.voice = String(overrides.voice);
+  if (!SUPPORTED_PROVIDERS.has(settings.provider)) throw new Error('Unsupported TTS provider: ' + settings.provider);
   if (settings.enabled === false) throw new Error('TTS is disabled for this room.');
   let phrase = String(text || '').replace(/\s+/g, ' ').trim();
   if (!phrase) throw new Error('TTS text cannot be empty.');
