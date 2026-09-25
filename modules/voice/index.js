@@ -15,18 +15,26 @@ function session(guildId){if(!sessions.has(guildId))sessions.set(guildId,{connec
 async function connect(member,client){
   if(!member?.voice?.channel)return null;
   const s=session(member.guild.id);
-  if(s.connectionPromise)return s.connectionPromise;
+
+  if(s.connectionPromise)await s.connectionPromise.catch(()=>{});
+  if(s.connection?.state?.status===VoiceConnectionStatus.Destroyed)s.connection=null;
+  if(s.connection?.joinConfig?.channelId===member.voice.channel.id&&s.connection.state.status===VoiceConnectionStatus.Ready)return s;
+
+  if(s.connection){
+    const previous=s.connection;
+    const ttsRoom=[...tempRooms.values()].find(r=>r.ttsConnection===previous);
+    if(ttsRoom)await tts.stop(ttsRoom,client).catch(e=>console.error('[Voice/TTS] Failed to stop TTS before channel switch:',e?.message||e));
+    previous.destroy();
+    s.connection=null;
+  }
+
   const work=(async()=>{
-    if(s.connection?.state?.status===VoiceConnectionStatus.Destroyed)s.connection=null;
-    if(s.connection?.joinConfig?.channelId===member.voice.channel.id)return s;
-    if(s.connection){
-      const previous=s.connection;
-      const ttsRoom=[...tempRooms.values()].find(r=>r.ttsConnection===previous);
-      if(ttsRoom)await tts.stop(ttsRoom,client).catch(e=>console.error('[Voice/TTS] Failed to stop TTS before channel switch:',e?.message||e));
-      previous.destroy();
-      s.connection=null;
-    }
-    const connection=joinVoiceChannel({channelId:member.voice.channel.id,guildId:member.guild.id,adapterCreator:member.guild.voiceAdapterCreator,selfDeaf:true});
+    const connection=joinVoiceChannel({
+      channelId:member.voice.channel.id,
+      guildId:member.guild.id,
+      adapterCreator:member.guild.voiceAdapterCreator,
+      selfDeaf:true
+    });
     s.connection=connection;
     connection.subscribe(s.player);
     try{
@@ -38,6 +46,7 @@ async function connect(member,client){
     }
     return s;
   })();
+
   s.connectionPromise=work;
   try{return await work;}
   finally{if(s.connectionPromise===work)s.connectionPromise=null;}
