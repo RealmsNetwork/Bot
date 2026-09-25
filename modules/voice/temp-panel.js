@@ -171,7 +171,7 @@ function buildPayload(client, room) {
       '**Volume:** ' + (t.volume ?? t.maxVolume ?? base.maxVolume ?? 100) + '%',
       '',
       'These settings override the module defaults for this temporary room only.'
-    ].join('\\n');
+    ].join('\n');
   } else if (page === 'audio') {
     rows.push(
       new ActionRowBuilder().addComponents(
