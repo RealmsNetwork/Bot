@@ -107,7 +107,9 @@ async function remoteStream(url) {
   return Readable.from(Buffer.from(await r.arrayBuffer()));
 }
 
-function ensurePlayer(room) {
+async function setBotMute(client,room,mute){try{const guild=client.guilds.cache.get(room.guildId);const me=await guild?.members.fetchMe().catch(()=>guild?.members.me);if(!me?.voice?.channelId||me.voice.channelId!==room.voiceChannelId)return false;if(me.voice.serverMute!==mute)await me.voice.setMute(mute,'Room TTS '+(mute?'idle':'speaking'));return true;}catch(e){console.error('[TempVC/TTS] Bot mute:',e?.message||e);return false;}}
+
+function ensurePlayer(room,client) {
   if (room.ttsPlayer) return room.ttsPlayer;
   room.ttsPlayer = createAudioPlayer();
   room.ttsQueue = [];
@@ -120,7 +122,7 @@ function ensurePlayer(room) {
     console.error('[TempVC/TTS] Player:', e?.message || e);
     room.ttsPlaying = false;
     room.ttsQueue?.shift();
-    playNext(room).catch(() => {});
+    playNext(room,client).catch(() => {});
   });
   return room.ttsPlayer;
 }
@@ -161,7 +163,7 @@ function settingsFor(room, client) {
   return room.tts;
 }
 
-async function playNext(room) {
+async function playNext(room,client) {
   if (!room.ttsQueue?.length) {
     room.ttsPlaying = false;
     return;
@@ -186,7 +188,8 @@ async function playNext(room) {
       throw new Error('Unsupported TTS provider: ' + item.settings.provider);
     }
     if (!room.ttsConnection || room.ttsConnection.state.status === VoiceConnectionStatus.Destroyed) throw new Error('Voice connection is unavailable.');
-    ensurePlayer(room);
+    ensurePlayer(room,client);
+    await setBotMute(client,room,false);
     room.ttsConnection.subscribe(room.ttsPlayer);
     room.ttsPlaying = true;
     room.ttsPlayer.play(resource);
@@ -210,16 +213,17 @@ async function speak(client, room, text, member) {
   phrase = phrase.slice(0, max);
   if (settings.prefixName && member?.displayName) phrase = member.displayName + ' says ' + phrase;
   await ensureConnection(client, room);
-  ensurePlayer(room);
+  ensurePlayer(room,client);
   room.ttsQueue.push({ text: phrase, settings });
-  if (!room.ttsPlaying) await playNext(room);
+  if (!room.ttsPlaying) await playNext(room,client);
 }
 
-function stop(room) {
+async function stop(room,client) {
   if (!room) return false;
   room.ttsQueue = [];
   room.ttsPlaying = false;
   room.ttsPlayer?.stop(true);
+  try{const guild=client?.guilds?.cache?.get(room.guildId);const me=await guild?.members.fetchMe().catch(()=>guild?.members.me);if(me?.voice?.channelId===room.voiceChannelId&&me.voice.serverMute!==true)await me.voice.setMute(true,'Room TTS stopped');}catch{}
   return true;
 }
 
