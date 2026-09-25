@@ -12,7 +12,7 @@
     "check": "node tools/qc.js",
     "syntax": "node tools/qc.js --syntax",
     "health": "node tools/qc.js --health",
-    "test": "node --test test"
+    "test": "node --test test/*.test.js"
   },
   "keywords": [
     "discord",
