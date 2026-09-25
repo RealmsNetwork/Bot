@@ -23,15 +23,21 @@ function roomFor(i){
 function canControlTts(i, room) {
   if (!room) return false;
   if (room.bannedUsers?.has?.(i.user.id)) return false;
+  const c = i.client.modules.get('voice')?.config?.temporaryVoice || {};
+  if (c.ownerOnlyControl === true || room.operatorControls === false) return room.ownerId === i.user.id;
   if (room.ownerId === i.user.id) return true;
-  if (room.operatorControls === false) return false;
   if (room.accessUsers?.has?.(i.user.id)) return true;
   return [...(room.accessRoles || [])].some(id => i.member?.roles?.cache?.has(id));
 }
 
 function controlConfigEnabled(i) {
-  const c = i.client.modules.get('voice')?.config?.temporaryVoice || {};
-  return c.allowOwnerTts !== false && c.panelAllowTtsControl !== false;
+  const moduleConfig = i.client.modules.get('voice')?.config || {};
+  const c = moduleConfig.temporaryVoice || {};
+  const ttsConfig = moduleConfig.tts || {};
+  return ttsConfig.panelEditable !== false &&
+    ttsConfig.allowUserVoiceSelection !== false &&
+    c.allowOwnerTts !== false &&
+    c.panelAllowTtsControl !== false;
 }
 
 function runtimeRoom(i){
@@ -54,6 +60,8 @@ async function speak(i,provider,text,extra={}){
   if(!i.deferred&&!i.replied)await i.deferReply({flags:MessageFlags.Ephemeral});
   const room=runtimeRoom(i);
   if(!room)return i.editReply({content:'Join a voice channel first.'});
+  const publicAudio = i.client.modules.get('voice')?.config?.tts?.allowPublicAudio !== false;
+  if(!publicAudio && !canControlTts(i,room))return i.editReply({content:'Public TTS is disabled for this room.'});
   room.tts=tts.settingsFor(room,i.client);
   room.tts.provider=provider;
   if(extra.lang)room.tts.lang=extra.lang;
