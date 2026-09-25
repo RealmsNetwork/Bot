@@ -465,7 +465,7 @@ async function create(client,member,voice,room){
 async function deleteRoom(client,rooms,room,guild,reason='Temporary voice room deleted'){
   if(!room)return;
   rooms.delete(room.voiceChannelId);
-  tts.stop(room);
+  tts.stop(room,client);
   room.ttsConnection?.destroy?.();
   const panel=room.panelChannelId&&guild.channels.cache.get(room.panelChannelId);
   const voice=guild.channels.cache.get(room.voiceChannelId);
@@ -646,7 +646,7 @@ async function handleButton(interaction,client,rooms){
   else if(action==='autotts-disable')room.tts.autoTts=false;
   else if(action==='prefix-enable')room.tts.prefixName=true;
   else if(action==='prefix-disable')room.tts.prefixName=false;
-  else if(action==='tts-stop')tts.stop(room);
+  else if(action==='tts-stop')tts.stop(room,client);
   else if(action==='speak')return showForm(interaction,'speak');
   else if(action==='rate-down')room.tts.rate=Math.max(50,(Number(room.tts.rate)||100)-10);
   else if(action==='rate-up')room.tts.rate=Math.min(150,(Number(room.tts.rate)||100)+10);
