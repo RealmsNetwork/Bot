@@ -296,6 +296,7 @@ function buildPayload(client, room, extras = {}) {
       new ActionRowBuilder().addComponents(
         button('tts-voices','Browse Voices',ButtonStyle.Primary),
         button('tts-languages','Browse Languages',ButtonStyle.Primary),
+        button('tts-voice-manual','Set Voice',ButtonStyle.Primary),
         button('rate-down','Rate -'),
         button('rate-up','Rate +'),
         button('volume','Volume')
@@ -514,9 +515,9 @@ async function revoke(room,guild,id,type,client){
 }
 
 async function showForm(interaction,kind){
-  const titles={rename:'Rename Room',limit:'User Limit',bitrate:'Voice Bitrate',region:'Voice Region',slowmode:'Chat Slowmode',rate:'TTS Rate',volume:'TTS Volume',speak:'Speak With TTS'};
-  const labels={rename:'New room name',limit:'0 = unlimited, 1-99 = limit',bitrate:'Bitrate in kbps',region:'Discord RTC region, blank = automatic',slowmode:'Slowmode seconds, 0-21600',rate:'Speech rate, 50-150',volume:'TTS volume, 0-150',speak:'Text to speak'};
-  const max={rename:100,limit:3,bitrate:5,region:32,slowmode:5,rate:3,volume:3,speak:500}[kind]||100;
+  const titles={rename:'Rename Room',limit:'User Limit',bitrate:'Voice Bitrate',region:'Voice Region',slowmode:'Chat Slowmode',rate:'TTS Rate',volume:'TTS Volume',speak:'Speak With TTS','tts-voice-manual':'Set TTS Voice'};
+  const labels={rename:'New room name',limit:'0 = unlimited, 1-99 = limit',bitrate:'Bitrate in kbps',region:'Discord RTC region, blank = automatic',slowmode:'Slowmode seconds, 0-21600',rate:'Speech rate, 50-150',volume:'TTS volume, 0-150',speak:'Text to speak','tts-voice-manual':'Edge or Polly voice name'};
+  const max={rename:100,limit:3,bitrate:5,region:32,slowmode:5,rate:3,volume:3,speak:500,'tts-voice-manual':100}[kind]||100;
   const modal=new ModalBuilder().setCustomId('rn-tvc-modal:'+kind).setTitle(titles[kind]||'Temporary VC');
   modal.addComponents(new ActionRowBuilder().addComponents(
     new TextInputBuilder().setCustomId('value').setLabel(labels[kind]||'Value').setStyle(kind==='speak'?TextInputStyle.Paragraph:TextInputStyle.Short).setRequired(kind!=='region').setMaxLength(max)
@@ -562,7 +563,7 @@ async function handleButton(interaction,client,rooms){
   const c=tc(client);
   const member=await getMember(interaction);
 
-  if(['rename','limit','bitrate','region','slowmode','rate','volume','speak'].includes(action))return showForm(interaction,action);
+  if(['rename','limit','bitrate','region','slowmode','rate','volume','speak','tts-voice-manual'].includes(action))return showForm(interaction,action);
   if(!voice&&action!=='delete')return interaction.reply({content:'The voice room no longer exists.',ephemeral:true});
 
   if(action==='lock'){room.locked=true;await voice.permissionOverwrites.edit(guild.roles.everyone,{Connect:false});}
@@ -711,6 +712,8 @@ async function handleModal(interaction,client,rooms){
       const n=Number(value);if(!Number.isInteger(n)||n<0||n>150)throw new Error('TTS volume must be 0-150.');room.tts.volume=n;
     }else if(kind==='speak'){
       await tts.speak(client,room,value,interaction.member);
+    }else if(kind==='tts-voice-manual'){
+      room.tts.voice=value;
     }else throw new Error('Unknown panel form.');
     room.page=kind==='speak'?'tts':'room';
     await interaction.reply({content:'Updated.',ephemeral:true});
