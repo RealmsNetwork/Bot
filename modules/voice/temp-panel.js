@@ -89,6 +89,7 @@ async function deferPanelInteraction(interaction) {
 function canAccess(interaction, room) {
   normalizeRoom(room, interaction.client);
   if (!interaction.member) return false;
+  if (room.bannedUsers.has(interaction.user.id)) return false;
   if (interaction.user.id === room.ownerId || room.accessUsers.has(interaction.user.id)) return true;
   return [...room.accessRoles].some(id => interaction.member.roles?.cache?.has(id));
 }
