@@ -555,6 +555,13 @@ async function speak(client, room, text, member, overrides = {}) {
   }
 }
 
+async function join(room,client) {
+  if (!room?.guildId || !room?.voiceChannelId) throw new Error('Invalid temporary voice room state.');
+  const connection = await ensureConnection(client,room);
+  await setBotMute(client,room,true);
+  return connection;
+}
+
 async function stop(room,client) {
   if (!room) return false;
   room.ttsGeneration = (room.ttsGeneration || 0) + 1;
@@ -578,6 +585,7 @@ module.exports = {
   synthesize: synthesizeEdge,
   settingsFor,
   speak,
+  join,
   stop,
   rateValue,
   volumeValue
