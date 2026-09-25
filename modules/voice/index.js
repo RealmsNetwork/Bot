@@ -1,9 +1,6 @@
-const {SlashCommandBuilder,EmbedBuilder,ActionRowBuilder,ButtonBuilder,ButtonStyle,ChannelType,UserSelectMenuBuilder,MessageFlags}=require('discord.js');
+const {SlashCommandBuilder,EmbedBuilder,ChannelType,MessageFlags}=require('discord.js');
 const {joinVoiceChannel,createAudioPlayer,createAudioResource,AudioPlayerStatus,VoiceConnectionStatus,entersState}=require('@discordjs/voice');
 const play=require('play-dl');
-const {EdgeTTS}=require('node-edge-tts');
-const path=require('node:path');
-const fs=require('node:fs');
 const tempPanel=require('./temp-panel');
 const ttsCommands=require('./tts-commands');
 const sessions=new Map();
@@ -26,7 +23,6 @@ const commands=[
 {data:new SlashCommandBuilder().setName('queue').setDescription('Show the music queue'),execute:async(i,client)=>{const s=sessions.get(i.guildId);return i.reply({embeds:[embed(client,'Music Queue',s?.queue?.length?s.queue.map((x,n)=>`${n+1}. **${x.title}**`).join('\n'):'The queue is empty.')]});}},
 {data:new SlashCommandBuilder().setName('volume').setDescription('Set music volume').addIntegerOption(o=>o.setName('percent').setDescription('0-150').setRequired(true).setMinValue(0).setMaxValue(150)),execute:async(i,client)=>{const s=sessions.get(i.guildId);if(!s)return i.reply({content:'Nothing is playing.',flags:MessageFlags.Ephemeral});const max=cfg(client).music.maxVolume||150;s.volume=Math.min(i.options.getInteger('percent',true),max);return i.reply(`Volume set to **${s.volume}%**.`);}},
 {data:new SlashCommandBuilder().setName('nowplaying').setDescription('Show the current track'),execute:async(i,client)=>{const s=sessions.get(i.guildId);return i.reply({embeds:[embed(client,'Now Playing',s?.current?`**${s.current.title}**\n${s.current.url}`:'Nothing is playing.')]});}},
-{data:new SlashCommandBuilder().setName('tts').setDescription('Speak text in your voice channel').addStringOption(o=>o.setName('text').setDescription('Text to speak').setRequired(true)),execute:async(i,client)=>{const c=cfg(client).tts;if(!c.enabled)return i.reply({content:'TTS is disabled.',flags:MessageFlags.Ephemeral});if(!i.member.voice.channel)return i.reply({content:'Join a voice channel first.',flags:MessageFlags.Ephemeral});const text=i.options.getString('text',true);const room=tempPanel.roomForVoice(i.member.voice.channelId);await i.deferReply({flags:MessageFlags.Ephemeral});try{if(room&&room.tts?.enabled!==false)await tempPanel.speak(client,room,text);else{const dir=path.join(__dirname,'../../data/tts');fs.mkdirSync(dir,{recursive:true});const file=path.join(dir,String(i.guildId)+'-'+String(i.user.id)+'-'+Date.now()+'.mp3');const tts=new EdgeTTS({voice:c.defaultVoice||'en-US-AriaNeural',lang:c.defaultLanguage||'en-US'});await tts.ttsPromise(text.slice(0,c.maxCharacters||500),file);const sessionState=await connect(i.member);ensurePlayerHooks(i.guildId,client);sessionState.player.play(createAudioResource(file,{inlineVolume:true}));sessionState.textChannelId=i.channelId;setTimeout(()=>fs.rm(file,{force:true},()=>{}),120000);}return i.editReply('Speaking now.');}catch(e){return i.editReply('TTS failed: '+e.message);}}},
 {data:new SlashCommandBuilder().setName('vcpanel').setDescription('Open your temporary voice room control panel'),execute:async(i)=>{const room=ownerOf(i.member.voice.channelId);if(!room)return i.reply({content:'You are not in a temporary voice room.',flags:MessageFlags.Ephemeral});if(!room.panelChannelId)return i.reply({content:'This room does not have a control panel.',flags:MessageFlags.Ephemeral});return i.reply({content:'Your temporary room panel is <#'+room.panelChannelId+'>.',flags:MessageFlags.Ephemeral});}}
 ];
 const listeners=[
