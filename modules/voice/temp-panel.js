@@ -637,7 +637,7 @@ async function handleButton(interaction,client,rooms){
     room.accessUsers.delete(member.id);
     await voice.permissionOverwrites.edit(member.id,{ViewChannel:false,Connect:false});
     await guild.channels.cache.get(room.panelChannelId)?.permissionOverwrites.delete(member.id).catch(()=>{});
-    await member.voice.disconnect('Banned from temporary VC').catch(()=>{});
+    if(targetIsInRoom(member,room))await member.voice.disconnect('Banned from temporary VC').catch(()=>{});
   }
   else if(action==='unban'){
     if(!member)return panelNotice(interaction,'Select a member first.');
