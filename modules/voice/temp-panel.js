@@ -799,6 +799,26 @@ async function cleanup(client,rooms){
   }
 }
 
+async function channelUpdate(oldChannel,newChannel,client,rooms){
+  if(!newChannel?.id||newChannel.type!==ChannelType.GuildVoice)return;
+  const room=rooms.get(newChannel.id);
+  if(!room)return;
+  try{
+    normalizeRoom(room,client);
+    const guild=newChannel.guild;
+    if(room.panelChannelId){
+      const panel=guild.channels.cache.get(room.panelChannelId);
+      if(panel){
+        const desired=panelSlug(client,newChannel.name);
+        if(panel.name!==desired)await panel.setName(desired,'Temporary VC room renamed').catch(()=>{});
+      }
+    }
+    await refresh(client,room,room.page||'overview');
+  }catch(e){
+    console.error('[TempVC] channelUpdate:',e?.stack||e);
+  }
+}
+
 function initialize(client,rooms){
   if(cleanupTimer)clearInterval(cleanupTimer);
   cleanupTimer=setInterval(()=>cleanup(client,rooms).catch(e=>console.error('[TempVC] Cleanup:',e?.stack||e)),Math.max(10,Number(tc(client).cleanupIntervalSeconds||30))*1000);
@@ -812,4 +832,4 @@ function destroy(){
   selections.clear();
 }
 
-module.exports={create,refresh,deleteRoom,initialize,destroy,recover,cleanup,handle,panelSlug,syncPermissions,normalizeRoom};
+module.exports={create,refresh,deleteRoom,initialize,destroy,recover,cleanup,handle,panelSlug,syncPermissions,normalizeRoom,channelUpdate};
