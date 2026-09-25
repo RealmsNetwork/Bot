@@ -1,9 +1,16 @@
+tts:
+  provider: edge
+  panelEditable: true
+  autoTts: false
+  outputFormat: audio-24khz-96kbitrate-mono-mp3
+  timeoutMs: 15000
 temporaryVoice:
   panelEnabled: true
   panelSuffix: "-panel"
   panelAutoPin: true
   panelAllowUserAccess: true
   panelAllowRoleAccess: true
+  panelAccessCanControl: true
   allowOwnerTts: true
   allowOwnerBan: true
   panelAllowTtsControl: true
