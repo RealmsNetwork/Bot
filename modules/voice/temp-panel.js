@@ -360,8 +360,8 @@ function buildPayload(client, room, extras = {}) {
     ].join('\n');
     rows.push(new ActionRowBuilder().addComponents(
       button('sync-perms','Sync Panel → VC',ButtonStyle.Primary),
-      button('toggle-sync',c.syncPermissions === false ? 'Enable Sync' : 'Disable Sync'),
-      button('toggle-operators',c.panelAccessCanControl === false ? 'Enable Operators' : 'Disable Operators'),
+      button('toggle-sync',room.syncPermissions === false ? 'Enable Sync' : 'Disable Sync'),
+      button('toggle-operators',room.operatorControls === false ? 'Enable Operators' : 'Disable Operators'),
       button('access','Manage Access'),
       button('refresh','Refresh')
     ));
