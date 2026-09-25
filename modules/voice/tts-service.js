@@ -396,12 +396,16 @@ async function speak(client, room, text, member) {
   if (!room.guildId || !room.voiceChannelId) throw new Error('Invalid temporary voice room state.');
 
   const cooldownMs = finiteConfigNumber(client.modules.get('voice')?.config?.tts?.cooldownSeconds, 0, 0, 60) * 1000;
+  let cooldownUserId = null;
+  let cooldownSetAt = null;
   if (cooldownMs > 0 && member?.id) {
     if (!(room.ttsCooldowns instanceof Map)) room.ttsCooldowns = new Map();
     const now = Date.now();
     const previous = room.ttsCooldowns.get(member.id) || 0;
     const remaining = cooldownMs - (now - previous);
     if (remaining > 0) throw new Error('TTS cooldown active. Please wait ' + Math.ceil(remaining / 1000) + 's.');
+    cooldownUserId = member.id;
+    cooldownSetAt = now;
     room.ttsCooldowns.set(member.id, now);
     if (room.ttsCooldowns.size > 1000) {
       for (const [id, at] of room.ttsCooldowns) {
@@ -411,7 +415,12 @@ async function speak(client, room, text, member) {
     }
   }
 
-  await ensureConnection(client, room);
+  try {
+    await ensureConnection(client, room);
+  } catch (e) {
+    if (cooldownUserId && room.ttsCooldowns?.get(cooldownUserId) === cooldownSetAt) room.ttsCooldowns.delete(cooldownUserId);
+    throw e;
+  }
   ensurePlayer(room,client);
   room.ttsQueue.push({ text: phrase, settings, requestedAt: Date.now(), requestHash: shortHash(sha256(JSON.stringify({ phrase, settings }))) });
   if (!room.ttsPlaying) await pump(room,client);
