@@ -314,86 +314,68 @@ function ensurePlayer(room,client) {
 }
 
 async function ensureConnection(client, room) {
-  const existingSession = client.voiceSessions?.get(room.guildId);
-  const existingPromise = existingSession?.connectionPromise || room.ttsConnectionPromise;
-  if (existingPromise) return existingPromise;
+  const guild = client.guilds.cache.get(room.guildId);
+  const channel = guild?.channels.cache.get(room.voiceChannelId);
+  if (!guild || !channel) throw new Error('Temporary voice room no longer exists.');
 
-  const work = (async () => {
-    const guild = client.guilds.cache.get(room.guildId);
-    const channel = guild?.channels.cache.get(room.voiceChannelId);
-    if (!guild || !channel) throw new Error('Temporary voice room no longer exists.');
+  const session = client.voiceSessions?.get(guild.id);
+  if (session?.connectionPromise) await session.connectionPromise.catch(() => {});
 
-    const session = client.voiceSessions?.get(guild.id);
-    let connection = room.ttsConnection || session?.connection;
-    if (connection?.joinConfig?.channelId !== channel.id) {
-      const previousTtsRoom = [...(client.voiceRooms?.values?.() || [])].find(candidate => candidate !== room && candidate.ttsConnection === connection);
-      if (previousTtsRoom) await stop(previousTtsRoom, client).catch(e => console.error('[TempVC/TTS] Failed to stop previous TTS room:', e?.message || e));
-      if (session && (session.current || session.queue?.length)) {
-        session.queue = [];
-        session.current = null;
-        session.player?.stop(true);
-        console.warn('[TempVC/TTS] Stopping music session because the bot is moving into the TTS room.');
-      }
-      connection?.destroy?.();
-      if (session?.connection === connection) session.connection = null;
-      connection = null;
-    }
+  if (room.ttsConnectionPromise) await room.ttsConnectionPromise.catch(() => {});
 
-    if (connection) {
-      const state = connection.state.status;
-      if (state === VoiceConnectionStatus.Destroyed) {
-        connection = null;
-      } else if (state === VoiceConnectionStatus.Disconnected) {
-        const rejoined = connection.rejoin();
-        if (rejoined) {
-          try {
-            await entersState(connection, VoiceConnectionStatus.Ready, 15000);
-          } catch {
-            connection.destroy();
-            connection = null;
-          }
-        } else {
-          connection.destroy();
-          connection = null;
-        }
-      } else if (state !== VoiceConnectionStatus.Ready) {
-        try {
-          await entersState(connection, VoiceConnectionStatus.Ready, 15000);
-        } catch {
-          connection.destroy();
-          connection = null;
-        }
-      }
-    }
+  const currentSession = client.voiceSessions?.get(guild.id);
+  let connection = currentSession?.connection || room.ttsConnection;
 
-    if (!connection) {
-      connection = joinVoiceChannel({
-        channelId: channel.id,
-        guildId: guild.id,
-        adapterCreator: guild.voiceAdapterCreator,
-        selfDeaf: true,
-        selfMute: false
-      });
-      try {
-        await entersState(connection, VoiceConnectionStatus.Ready, 15000);
-      } catch (e) {
-        connection.destroy();
-        throw e;
-      }
-      if (session) session.connection = connection;
-    }
-
+  if (connection?.joinConfig?.channelId === channel.id && connection.state.status === VoiceConnectionStatus.Ready) {
     room.ttsConnection = connection;
     return connection;
+  }
+
+  if (connection) {
+    const previousTtsRoom = [...(client.voiceRooms?.values?.() || [])]
+      .find(candidate => candidate !== room && candidate.ttsConnection === connection);
+    if (previousTtsRoom) await stop(previousTtsRoom, client).catch(e => console.error('[TempVC/TTS] Failed to stop previous TTS room:', e?.message || e));
+
+    if (currentSession && (currentSession.current || currentSession.queue?.length)) {
+      currentSession.queue = [];
+      currentSession.current = null;
+      currentSession.player?.stop(true);
+      console.warn('[TempVC/TTS] Stopping music session because the bot is moving into the TTS room.');
+    }
+
+    connection.destroy?.();
+    if (currentSession?.connection === connection) currentSession.connection = null;
+    if (room.ttsConnection === connection) room.ttsConnection = null;
+  }
+
+  const work = (async () => {
+    const next = joinVoiceChannel({
+      channelId: channel.id,
+      guildId: guild.id,
+      adapterCreator: guild.voiceAdapterCreator,
+      selfDeaf: true,
+      selfMute: false
+    });
+    if (currentSession) currentSession.connection = next;
+    try {
+      await entersState(next, VoiceConnectionStatus.Ready, 15000);
+    } catch (e) {
+      if (currentSession?.connection === next) currentSession.connection = null;
+      next.destroy();
+      throw e;
+    }
+    room.ttsConnection = next;
+    return next;
   })();
 
-  if (existingSession) existingSession.connectionPromise = work;
+  if (currentSession) currentSession.connectionPromise = work;
   else room.ttsConnectionPromise = work;
+
   try {
     return await work;
   } finally {
-    if (existingSession?.connectionPromise === work) existingSession.connectionPromise = null;
-    if (!existingSession && room.ttsConnectionPromise === work) room.ttsConnectionPromise = null;
+    if (currentSession?.connectionPromise === work) currentSession.connectionPromise = null;
+    if (!currentSession && room.ttsConnectionPromise === work) room.ttsConnectionPromise = null;
   }
 }
 
