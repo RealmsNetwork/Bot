@@ -31,7 +31,7 @@ try {
 }
 
 const { panelSlug } = voicePanel;
-const { languageList, rateValue, volumeValue, settingsFor, speak } = ttsService;
+const { languageList, parseLanguageCatalog, rateValue, volumeValue, settingsFor, speak } = ttsService;
 
 function clientWithTts(tts = {}, temporaryVoice = {}) {
   return {
@@ -91,6 +91,17 @@ test('rate and volume values are encoded as provider percentages', () => {
   assert.equal(volumeValue(100), 'default');
   assert.equal(volumeValue(150), '+50%');
   assert.equal(volumeValue(40), '-60%');
+});
+
+
+test('parseLanguageCatalog reads the nested Google language map', () => {
+  const languages = parseLanguageCatalog({
+    sl: { auto: 'Detect language' },
+    tl: { en: 'English', es: 'Spanish', 'pt-BR': 'Portuguese (Brazil)' }
+  });
+
+  assert.deepEqual(languages.map(x => x.code), ['en', 'es', 'pt-br']);
+  assert.equal(languages.find(x => x.code === 'pt-br').name, 'Portuguese (Brazil)');
 });
 
 test('languageList deduplicates locales by language code', () => {
