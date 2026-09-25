@@ -348,6 +348,8 @@ function panelOverwrites(guild, ownerId) {
     {id:guild.members.me?.id||guild.client.user.id,allow:[PermissionFlagsBits.ViewChannel,PermissionFlagsBits.SendMessages,PermissionFlagsBits.ReadMessageHistory,PermissionFlagsBits.EmbedLinks,PermissionFlagsBits.ManageChannels,PermissionFlagsBits.ManageMessages]}
   ];
 }
+function roomForVoice(channelId) { for(const room of roomsForLookup.values()) if(room.voiceChannelId===channelId) return room; return null; }
+let roomsForLookup=new Map();
 async function create(client, member, voice, room) {
   const c=tv(client);
   if(c.panelEnabled===false)return null;
@@ -665,6 +667,7 @@ async function cleanup(client,rooms){
   }
 }
 function initialize(client,rooms){
+  roomsForLookup=rooms;
   if(cleanupTimer)clearInterval(cleanupTimer);
   const seconds=Math.max(10,Number(tv(client).cleanupIntervalSeconds||30));
   cleanupTimer=setInterval(()=>cleanup(client,rooms).catch(e=>console.error('[TempVC] Cleanup failed:',e?.stack||e)),seconds*1000);
@@ -684,4 +687,4 @@ async function handle(interaction,client,rooms){
     if(!interaction.replied&&!interaction.deferred)await interaction.reply({content:'Panel action failed: '+(e?.message||e),ephemeral:true}).catch(()=>{});
   }
 }
-module.exports={create,refresh,deleteRoom,initialize,destroy,recover,cleanup,handle,channelUpdate,panelSlug,speak,makePayload};
+module.exports={create,refresh,deleteRoom,initialize,destroy,recover,cleanup,handle,channelUpdate,panelSlug,speak,makePayload,roomForVoice};
