@@ -84,6 +84,8 @@ temporaryVoice:
   syncPermissions: true
   maxBitrate: 384000
   cleanupIntervalSeconds: 30
+  emptyRoomGraceSeconds: 300
+  recoveryGraceSeconds: 600
 
 branding:
   panelTitle: "Voice Control"
