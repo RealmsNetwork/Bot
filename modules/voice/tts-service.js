@@ -199,12 +199,12 @@ function ensurePlayer(room,client) {
   room.ttsPlayer = createAudioPlayer();
   room.ttsPlayer.on(AudioPlayerStatus.Idle, () => {
     room.ttsPlaying = false;
-    playNext(room,client).catch(e => console.error('[TempVC/TTS]', e?.stack || e));
+    pump(room,client).catch(e => console.error('[TempVC/TTS]', e?.stack || e));
   });
   room.ttsPlayer.on('error', e => {
     console.error('[TempVC/TTS] Player:', e?.stack || e?.message || e);
     room.ttsPlaying = false;
-    playNext(room,client).catch(err => console.error('[TempVC/TTS] Queue recovery:', err?.message || err));
+    pump(room,client).catch(err => console.error('[TempVC/TTS] Queue recovery:', err?.message || err));
   });
   return room.ttsPlayer;
 }
@@ -340,6 +340,11 @@ async function playNext(room,client) {
     if (!room.ttsConnection || room.ttsConnection.state.status !== VoiceConnectionStatus.Ready) throw new Error('Voice connection is unavailable.');
     ensurePlayer(room,client);
     await setBotMute(client,room,false);
+    if (generation !== (room.ttsGeneration || 0) || !room.ttsQueue?.length || room.ttsQueue[0] !== item) {
+      if (file) await fs.promises.rm(file, { force: true }).catch(() => {});
+      room.ttsPlaying = false;
+      return;
+    }
     room.ttsConnection.subscribe(room.ttsPlayer);
     room.ttsPlaying = true;
     room.ttsPlayer.play(resource);
