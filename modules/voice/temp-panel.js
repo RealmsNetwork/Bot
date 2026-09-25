@@ -16,6 +16,7 @@ const {
 const tts = require('./tts-service');
 
 let cleanupTimer = null;
+let cleanupRunning = false;
 const selections = new Map();
 const SELECTION_TTL_MS = 10 * 60 * 1000;
 const MAX_SELECTIONS = 5000;
@@ -1100,31 +1101,38 @@ async function recover(client,rooms){
 }
 
 async function cleanup(client,rooms){
-  if(tc(client).autoDeleteEmpty===false)return;
-  for(const room of [...rooms.values()]){
-    const guild=client.guilds.cache.get(room.guildId);
-    if(!guild){rooms.delete(room.voiceChannelId);continue;}
-    const voice=guild.channels.cache.get(room.voiceChannelId);
-    if(!voice){
-      rooms.delete(room.voiceChannelId);
-      await deletePersistedRoom(client,room);
-      const panel=room.panelChannelId&&guild.channels.cache.get(room.panelChannelId);
-      await panel?.delete('Temporary VC voice channel missing').catch(()=>{});
-      continue;
-    }
-    if(voice.members.size===0){
-      const now=Date.now();
-      if(!room.emptySince){
-        room.emptySince=now;
+  if(cleanupRunning||tc(client).autoDeleteEmpty===false)return;
+  cleanupRunning=true;
+  try{
+    for(const room of [...rooms.values()]){
+      const guild=client.guilds.cache.get(room.guildId);
+      if(!guild){rooms.delete(room.voiceChannelId);continue;}
+      const voice=guild.channels.cache.get(room.voiceChannelId);
+      if(!voice){
+        rooms.delete(room.voiceChannelId);
+        await deletePersistedRoom(client,room);
+        const panel=room.panelChannelId&&guild.channels.cache.get(room.panelChannelId);
+        await panel?.delete('Temporary VC voice channel missing').catch(()=>{});
+        continue;
+      }
+      if(voice.members.size===0){
+        const now=Date.now();
+        if(!room.emptySince){
+          room.emptySince=now;
+          await persistRoom(client,room);
+        }
+        if(Number(room.recoveryGraceUntil)>now)continue;
+        if(now-Number(room.emptySince)>=emptyGraceMs(client)){
+          await deleteRoom(client,rooms,room,guild,'Temporary voice room empty');
+        }
+      }else if(room.emptySince){
+        room.emptySince=null;
+        room.recoveryGraceUntil=0;
         await persistRoom(client,room);
       }
-      if(Number(room.recoveryGraceUntil)>now)continue;
-      if(now-Number(room.emptySince)>=emptyGraceMs(client))await deleteRoom(client,rooms,room,guild,'Temporary voice room empty');
-    }else if(room.emptySince){
-      room.emptySince=null;
-      room.recoveryGraceUntil=0;
-      await persistRoom(client,room);
     }
+  }finally{
+    cleanupRunning=false;
   }
 }
 
