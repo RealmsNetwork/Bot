@@ -8,12 +8,14 @@ const MAX_TTS_ROOMS = 1000;
 function pruneRuntimeRooms(map, now = Date.now()) {
   if (!map?.size) return;
   for (const [id, room] of map) {
-    if (now - Number(room.lastUsedAt || 0) > TTS_ROOM_TTL_MS) map.delete(id);
+    const active=room.ttsPlaying===true||room.ttsPump||room.ttsQueue?.length;
+    if (!active && now - Number(room.lastUsedAt || 0) > TTS_ROOM_TTL_MS) map.delete(id);
   }
-  while (map.size > MAX_TTS_ROOMS) {
-    const oldest = map.keys().next().value;
-    if (oldest === undefined) break;
-    map.delete(oldest);
+  if (map.size <= MAX_TTS_ROOMS) return;
+  for (const [id, room] of map) {
+    if (map.size <= MAX_TTS_ROOMS) break;
+    const active=room.ttsPlaying===true||room.ttsPump||room.ttsQueue?.length;
+    if (!active) map.delete(id);
   }
 }
 
