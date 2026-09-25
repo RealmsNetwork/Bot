@@ -21,6 +21,135 @@ const GOOGLE_TTS_URL = 'https://translate.google.com/translate_tts';
 const POLLY_TTS_URL = 'https://api.streamelements.com/kappa/v2/speech';
 const cache = { at: 0, voices: [] };
 const languageCache = { at: 0, values: [] };
+let voiceFetchPromise = null;
+let languageFetchPromise = null;
+const MAX_JSON_BYTES = 2 * 1024 * 1024;
+const SUPPORTED_PROVIDERS = new Set(['edge','google','polly']);
+const MAX_AUDIO_BYTES = 8 * 1024 * 1024;
+const MAX_REMOTE_BYTES = 8 * 1024 * 1024;
+const DEFAULT_HTTP_TIMEOUT = 15000;
+const ALLOWED_AUDIO_TYPES = new Set([
+  'audio/mpeg',
+  'audio/mp3',
+  'audio/ogg',
+  'audio/opus',
+  'audio/wav',
+  'audio/x-wav',
+  'application/ogg',
+  'application/octet-stream'
+]);
+
+function sha256(value) {
+  return createHash('sha256').update(value).digest('hex');
+}
+
+function shortHash(value) {
+  return String(value || '').slice(0, 16);
+}
+
+function timeoutSignal(ms, baseSignal = null) {
+  const timeout = AbortSignal.timeout(Math.max(1000, Number(ms) || DEFAULT_HTTP_TIMEOUT));
+  return baseSignal ? AbortSignal.any([baseSignal, timeout]) : timeout;
+}
+
+async function fetchWithTimeout(url, options = {}, timeoutMs = DEFAULT_HTTP_TIMEOUT, consume = null) {
+  const signal = timeoutSignal(timeoutMs, options.signal);
+  try {
+    const response = await fetch(url, { ...options, signal });
+    return typeof consume === 'function' ? await consume(response) : response;
+  } catch (e) {
+    if (e?.name === 'TimeoutError' || (signal.aborted && signal.reason?.name === 'TimeoutError')) {
+      throw new Error('TTS request timed out.');
+    }
+    throw e;
+  }
+}
+
+async function hashFile(file) {
+  return new Promise((resolve, reject) => {
+    const hash = createHash('sha256');
+    const stream = fs.createReadStream(file);
+    stream.on('data', chunk => hash.update(chunk));
+    stream.on('error', reject);
+    stream.on('end', () => resolve(hash.digest('hex')));
+  });
+}
+
+function hasAudioSignature(buffer) {
+  if (!buffer || buffer.length < 4) return false;
+  if (buffer.subarray(0, 4).toString('ascii') === 'OggS') return true;
+  if (buffer.subarray(0, 4).toString('ascii') === 'RIFF' && buffer.subarray(8, 12).toString('ascii') === 'WAVE') return true;
+  if (buffer.subarray(0, 3).toString('ascii') === 'ID3') return true;
+  return buffer[0] === 0xff && (buffer[1] & 0xe0) === 0xe0;
+}
+
+async function validateAudioFile(file, maxBytes = MAX_AUDIO_BYTES) {
+  const stat = await fs.promises.stat(file);
+  if (!stat.isFile() || stat.size <= 0) throw new Error('TTS provider returned an empty audio file.');
+  if (stat.size > maxBytes) throw new Error('TTS audio response exceeded the safety size limit.');
+  const head = Buffer.alloc(Math.min(32, stat.size));
+  const fd = await fs.promises.open(file, 'r');
+  try {
+    await fd.read(head, 0, head.length, 0);
+  } finally {
+    await fd.close();
+  }
+  if (!hasAudioSignature(head)) throw new Error('TTS provider returned an invalid audio file.');
+  return { size: stat.size, sha256: await hashFile(file) };
+}
+
+async function readResponseBuffer(response, maxBytes = MAX_JSON_BYTES) {
+  const length = Number(response.headers.get('content-length') || 0);
+  if (Number.isFinite(length) && length > maxBytes) throw new Error('TTS API response exceeded the safety size limit.');
+  if (!response.body) throw new Error('TTS API returned no response body');
+  const chunks = [];
+  let total = 0;
+  const reader = response.body.getReader();
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > maxBytes) throw new Error('TTS API response exceeded the safety size limit.');
+      chunks.push(Buffer.from(value));
+    }
+  } catch (e) {
+    await reader.cancel().catch(() => {});
+    throw e;
+  } finally {
+    reader.releaseLock?.();
+  }
+  return Buffer.concat(chunks);
+}
+
+async function readRemoteAudio(response, maxBytes = MAX_REMOTE_BYTES) {
+  const type = String(response.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
+  const length = Number(response.headers.get('content-length') || 0);
+  if (Number.isFinite(length) && length > maxBytes) throw new Error('TTS audio response exceeded the safety size limit.');
+  if (type && !ALLOWED_AUDIO_TYPES.has(type)) throw new Error('TTS provider returned an unexpected content type.');
+  const chunks = [];
+  let total = 0;
+  if (!response.body) throw new Error('TTS API returned no audio body');
+  const reader = response.body.getReader();
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > maxBytes) throw new Error('TTS audio response exceeded the safety size limit.');
+      chunks.push(Buffer.from(value));
+    }
+  } catch (e) {
+    await reader.cancel().catch(() => {});
+    throw e;
+  } finally {
+    reader.releaseLock?.();
+  }
+  const buffer = Buffer.concat(chunks);
+  if (!buffer.length) throw new Error('TTS provider returned an empty audio response.');
+  if (!hasAudioSignature(buffer.subarray(0, 32))) throw new Error('TTS provider returned invalid audio data.');
+  return { buffer, type, sha256: sha256(buffer) };
+}
 
 function secMsGec() {
   const ticks = BigInt(Math.floor(Date.now() / 1000) + 11644473600) * 10000000n;
@@ -30,20 +159,29 @@ function secMsGec() {
 
 async function listVoices(force = false) {
   if (!force && cache.voices.length && Date.now() - cache.at < 21600000) return cache.voices;
-  const url = VOICE_LIST_URL + '&Sec-MS-GEC=' + secMsGec() + '&Sec-MS-GEC-Version=1-' + CHROMIUM_FULL_VERSION;
-  const r = await fetch(url, {
-    headers: {
-      Accept: '*/*',
-      'Accept-Language': 'en-US,en;q=0.9',
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/' +
-        CHROMIUM_FULL_VERSION.split('.')[0] + '.0.0.0 Safari/537.36 Edg/' + CHROMIUM_FULL_VERSION.split('.')[0] + '.0.0.0'
-    }
-  });
-  if (!r.ok) throw new Error('Edge voices API HTTP ' + r.status);
-  const data = await r.json();
-  cache.voices = Array.isArray(data) ? data.filter(v => v?.ShortName || v?.Name) : [];
-  cache.at = Date.now();
-  return cache.voices;
+  if (voiceFetchPromise) return voiceFetchPromise;
+  voiceFetchPromise = (async () => {
+    const url = VOICE_LIST_URL + '&Sec-MS-GEC=' + secMsGec() + '&Sec-MS-GEC-Version=1-' + CHROMIUM_FULL_VERSION;
+    const data = JSON.parse((await fetchWithTimeout(url, {
+      headers: {
+        Accept: '*/*',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/' +
+          CHROMIUM_FULL_VERSION.split('.')[0] + '.0.0.0 Safari/537.36 Edg/' + CHROMIUM_FULL_VERSION.split('.')[0] + '.0.0.0'
+      }
+    }, DEFAULT_HTTP_TIMEOUT, async response => {
+      if (!response.ok) throw new Error('Edge voices API HTTP ' + response.status);
+      return readResponseBuffer(response, MAX_JSON_BYTES);
+    })).toString('utf8'));
+    cache.voices = Array.isArray(data) ? data.filter(v => v?.ShortName || v?.Name) : [];
+    cache.at = Date.now();
+    return cache.voices;
+  })();
+  try {
+    return await voiceFetchPromise;
+  } finally {
+    voiceFetchPromise = null;
+  }
 }
 
 function languageList(voices) {
@@ -62,15 +200,24 @@ function languageList(voices) {
 
 async function listLanguages(force = false) {
   if (!force && languageCache.values.length && Date.now() - languageCache.at < 21600000) return languageCache.values;
-  const r = await fetch(GOOGLE_LANG_URL, { headers: { 'user-agent': 'RealmsNetwork-Bot/0.2', accept: 'application/json,*/*' } });
-  if (!r.ok) throw new Error('Google language API HTTP ' + r.status);
-  const data = await r.json();
-  languageCache.values = Object.entries(data || {})
-    .map(([code, name]) => ({ code: String(code), name: String(name) }))
-    .filter(x => x.code && x.name)
-    .sort((a, b) => a.name.localeCompare(b.name));
-  languageCache.at = Date.now();
-  return languageCache.values;
+  if (languageFetchPromise) return languageFetchPromise;
+  languageFetchPromise = (async () => {
+    const data = JSON.parse((await fetchWithTimeout(GOOGLE_LANG_URL, { headers: { 'user-agent': 'RealmsNetwork-Bot/0.2', accept: 'application/json,*/*' } }, DEFAULT_HTTP_TIMEOUT, async response => {
+      if (!response.ok) throw new Error('Google language API HTTP ' + response.status);
+      return readResponseBuffer(response, MAX_JSON_BYTES);
+    })).toString('utf8'));
+    languageCache.values = Object.entries(data || {})
+      .map(([code, name]) => ({ code: String(code), name: String(name) }))
+      .filter(x => x.code && x.name)
+      .sort((a, b) => a.name.localeCompare(b.name));
+    languageCache.at = Date.now();
+    return languageCache.values;
+  })();
+  try {
+    return await languageFetchPromise;
+  } finally {
+    languageFetchPromise = null;
+  }
 }
 
 function rateValue(value) {
@@ -86,6 +233,7 @@ function volumeValue(value) {
 }
 
 async function synthesizeEdge(text, file, settings = {}) {
+  const timeoutMs = Math.max(1000, Number(settings.timeoutMs ?? settings.timeout ?? DEFAULT_HTTP_TIMEOUT));
   const tts = new EdgeTTS({
     voice: settings.voice || 'en-US-AriaNeural',
     lang: settings.lang || 'en-US',
@@ -93,36 +241,80 @@ async function synthesizeEdge(text, file, settings = {}) {
     rate: rateValue(settings.rate),
     pitch: settings.pitch || 'default',
     volume: volumeValue(settings.volume),
-    timeout: Math.max(5000, Number(settings.timeout || 15000))
+    timeout: timeoutMs
   });
-  await tts.ttsPromise(String(text), file);
+  let timer;
+  let timedOut = false;
+  const pending = tts.ttsPromise(String(text), file);
+  pending.finally(() => {
+    if (timedOut) fs.promises.rm(file, { force: true }).catch(() => {});
+  }).catch(() => {});
+  try {
+    await Promise.race([
+      pending,
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error('Edge TTS request timed out.')), timeoutMs);
+        timer.unref?.();
+      })
+    ]);
+  } catch (e) {
+    if (e?.message === 'Edge TTS request timed out.') timedOut = true;
+    throw e;
+  } finally {
+    clearTimeout(timer);
+  }
   return file;
 }
 
-async function remoteStream(url) {
-  const r = await fetch(url, { headers: { 'user-agent': 'RealmsNetwork-Bot/0.2' } });
-  if (!r.ok) throw new Error('TTS API HTTP ' + r.status);
-  if (!r.body) throw new Error('TTS API returned no audio body');
-  if (typeof Readable.fromWeb === 'function') return Readable.fromWeb(r.body);
-  return Readable.from(Buffer.from(await r.arrayBuffer()));
+async function remoteStream(url, timeoutMs = DEFAULT_HTTP_TIMEOUT, maxBytes = MAX_REMOTE_BYTES) {
+  const audio = await fetchWithTimeout(url, { headers: { 'user-agent': 'RealmsNetwork-Bot/0.2', accept: 'audio/*,*/*;q=0.1' } }, timeoutMs, async response => {
+    if (!response.ok) throw new Error('TTS API HTTP ' + response.status);
+    return readRemoteAudio(response, maxBytes);
+  });
+  console.info('[TempVC/TTS] Remote audio SHA-256:', shortHash(audio.sha256), 'bytes:', audio.buffer.length);
+  return Readable.from(audio.buffer);
 }
 
 async function setBotMute(client,room,mute){try{const guild=client.guilds.cache.get(room.guildId);const me=await guild?.members.fetchMe().catch(()=>guild?.members.me);if(!me?.voice?.channelId||me.voice.channelId!==room.voiceChannelId)return false;if(me.voice.serverMute!==mute)await me.voice.setMute(mute,'Room TTS '+(mute?'idle':'speaking'));return true;}catch(e){console.error('[TempVC/TTS] Bot mute:',e?.message||e);return false;}}
 
+function pauseMusicForTts(client, room) {
+  const session = client.voiceSessions?.get(room.guildId);
+  if (!session?.connection || session.connection !== room.ttsConnection) return;
+  if (session.player?.state?.status !== AudioPlayerStatus.Playing) return;
+  if (session.player.pause(false)) room.ttsPausedMusic = true;
+}
+
+function resumeMusicAfterTts(client, room) {
+  if (!room.ttsPausedMusic) return;
+  room.ttsPausedMusic = false;
+  const session = client.voiceSessions?.get(room.guildId);
+  if (!session?.connection || session.connection !== room.ttsConnection) return;
+  if (!session.current) return;
+  session.connection.subscribe(session.player);
+  if (session.player?.state?.status === AudioPlayerStatus.Paused) session.player.unpause();
+}
+
 function ensurePlayer(room,client) {
+  if (!Array.isArray(room.ttsQueue)) room.ttsQueue = [];
+  if (room.ttsPlaying === undefined) room.ttsPlaying = false;
   if (room.ttsPlayer) return room.ttsPlayer;
   room.ttsPlayer = createAudioPlayer();
-  room.ttsQueue = [];
-  room.ttsPlaying = false;
   room.ttsPlayer.on(AudioPlayerStatus.Idle, () => {
+    const file = room.ttsCurrentFile;
+    room.ttsCurrentFile = null;
+    room.ttsCurrentItem = null;
+    if (file) fs.promises.rm(file, { force: true }).catch(e => console.error('[TempVC/TTS] Audio cleanup:', e?.message || e));
     room.ttsPlaying = false;
-    playNext(room,client).catch(e => console.error('[TempVC/TTS]', e?.stack || e));
+    pump(room,client).catch(e => console.error('[TempVC/TTS]', e?.stack || e));
   });
   room.ttsPlayer.on('error', e => {
-    console.error('[TempVC/TTS] Player:', e?.message || e);
+    const file = room.ttsCurrentFile;
+    room.ttsCurrentFile = null;
+    room.ttsCurrentItem = null;
+    if (file) fs.promises.rm(file, { force: true }).catch(err => console.error('[TempVC/TTS] Audio cleanup:', err?.message || err));
+    console.error('[TempVC/TTS] Player:', e?.stack || e?.message || e);
     room.ttsPlaying = false;
-    room.ttsQueue?.shift();
-    playNext(room,client).catch(() => {});
+    pump(room,client).catch(err => console.error('[TempVC/TTS] Queue recovery:', err?.message || err));
   });
   return room.ttsPlayer;
 }
@@ -131,33 +323,90 @@ async function ensureConnection(client, room) {
   const guild = client.guilds.cache.get(room.guildId);
   const channel = guild?.channels.cache.get(room.voiceChannelId);
   if (!guild || !channel) throw new Error('Temporary voice room no longer exists.');
-  let connection = client.voiceSessions?.get(guild.id)?.connection || room.ttsConnection;
-  if (connection?.joinConfig?.channelId !== channel.id) {
-    if (connection) connection.destroy();
-    connection = joinVoiceChannel({
+
+  const session = client.voiceSessions?.get(guild.id);
+  if (session?.connectionPromise) await session.connectionPromise.catch(() => {});
+
+  if (room.ttsConnectionPromise) await room.ttsConnectionPromise.catch(() => {});
+
+  const currentSession = client.voiceSessions?.get(guild.id);
+  let connection = currentSession?.connection || room.ttsConnection;
+
+  if (connection?.joinConfig?.channelId === channel.id && connection.state.status === VoiceConnectionStatus.Ready) {
+    room.ttsConnection = connection;
+    return connection;
+  }
+
+  if (connection) {
+    const previousTtsRoom = [...(client.voiceRooms?.values?.() || [])]
+      .find(candidate => candidate !== room && candidate.ttsConnection === connection);
+    if (previousTtsRoom) await stop(previousTtsRoom, client).catch(e => console.error('[TempVC/TTS] Failed to stop previous TTS room:', e?.message || e));
+
+    if (currentSession && (currentSession.current || currentSession.queue?.length)) {
+      currentSession.queue = [];
+      currentSession.current = null;
+      currentSession.player?.stop(true);
+      console.warn('[TempVC/TTS] Stopping music session because the bot is moving into the TTS room.');
+    }
+
+    connection.destroy?.();
+    if (currentSession?.connection === connection) currentSession.connection = null;
+    if (room.ttsConnection === connection) room.ttsConnection = null;
+  }
+
+  const promise = (async () => {
+    const next = joinVoiceChannel({
       channelId: channel.id,
       guildId: guild.id,
       adapterCreator: guild.voiceAdapterCreator,
       selfDeaf: true,
       selfMute: false
     });
-    await entersState(connection, VoiceConnectionStatus.Ready, 15000);
-    const session = client.voiceSessions?.get(guild.id);
-    if (session) session.connection = connection;
+    if (currentSession) currentSession.connection = next;
+    try {
+      await entersState(next, VoiceConnectionStatus.Ready, 15000);
+    } catch (e) {
+      if (currentSession?.connection === next) currentSession.connection = null;
+      next.destroy();
+      throw e;
+    }
+    room.ttsConnection = next;
+    return next;
+  })();
+
+  if (currentSession) currentSession.connectionPromise = promise;
+  else room.ttsConnectionPromise = promise;
+
+  try {
+    return await promise;
+  } finally {
+    if (currentSession?.connectionPromise === promise) currentSession.connectionPromise = null;
+    if (!currentSession && room.ttsConnectionPromise === promise) room.ttsConnectionPromise = null;
   }
-  room.ttsConnection = connection;
-  return connection;
+}
+
+function finiteConfigNumber(value, fallback, min, max) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(min, Math.min(max, n));
 }
 
 function settingsFor(room, client) {
   const c = client.modules.get('voice')?.config?.tts || {};
   room.tts = room.tts && typeof room.tts === 'object' ? room.tts : {};
-  if (!room.tts.provider) room.tts.provider = c.provider || 'edge';
+  if (!SUPPORTED_PROVIDERS.has(room.tts.provider)) room.tts.provider = SUPPORTED_PROVIDERS.has(c.provider) ? c.provider : 'edge';
   if (!room.tts.voice) room.tts.voice = c.defaultVoice || 'en-US-AriaNeural';
   if (!room.tts.lang) room.tts.lang = c.defaultLanguage || 'en-US';
-  if (!Number.isFinite(Number(room.tts.rate))) room.tts.rate = 100;
-  if (!Number.isFinite(Number(room.tts.volume))) room.tts.volume = Number(c.maxVolume || 100);
-  if (room.tts.enabled === undefined) room.tts.enabled = c.enabled !== false;
+
+  const maxRate = finiteConfigNumber(c.maxRate, 150, 50, 150);
+  const maxVolume = finiteConfigNumber(c.maxVolume, 100, 0, 150);
+  room.tts.rate = finiteConfigNumber(room.tts.rate, 100, 50, maxRate);
+  room.tts.volume = finiteConfigNumber(room.tts.volume, maxVolume, 0, maxVolume);
+  room.tts.timeoutMs = finiteConfigNumber(c.timeoutMs, DEFAULT_HTTP_TIMEOUT, 1000, 120000);
+  room.tts.maxAudioBytes = finiteConfigNumber(c.maxAudioBytes, MAX_AUDIO_BYTES, 64 * 1024, 32 * 1024 * 1024);
+  room.tts.maxRemoteBytes = finiteConfigNumber(c.maxRemoteBytes, MAX_REMOTE_BYTES, 64 * 1024, 32 * 1024 * 1024);
+  if (c.enabled === false) room.tts.enabled = false;
+  else if (room.tts.enabled === undefined) room.tts.enabled = true;
   if (room.tts.autoTts === undefined) room.tts.autoTts = false;
   if (room.tts.prefixName === undefined) room.tts.prefixName = true;
   return room.tts;
@@ -166,63 +415,158 @@ function settingsFor(room, client) {
 async function playNext(room,client) {
   if (!room.ttsQueue?.length) {
     room.ttsPlaying = false;
+    resumeMusicAfterTts(client, room);
     return;
   }
   const item = room.ttsQueue[0];
+  const generation = room.ttsGeneration || 0;
   try {
     let resource;
     let file = null;
     if (item.settings.provider === 'edge') {
       const dir = path.join(__dirname, '../../data/tts');
-      fs.mkdirSync(dir, { recursive: true });
+      await fs.promises.mkdir(dir, { recursive: true });
       file = path.join(dir, room.guildId + '-' + room.voiceChannelId + '-' + Date.now() + '-' + Math.random().toString(36).slice(2) + '.mp3');
       await synthesizeEdge(item.text, file, item.settings);
+      const verified = await validateAudioFile(file, item.settings.maxAudioBytes);
+      console.info('[TempVC/TTS] Edge audio SHA-256:', shortHash(verified.sha256), 'bytes:', verified.size);
       resource = createAudioResource(file, { inputType: StreamType.Arbitrary });
     } else if (item.settings.provider === 'google') {
       const text = encodeURIComponent(item.text.slice(0, 200));
       const lang = encodeURIComponent(item.settings.lang || 'en');
-      resource = createAudioResource(await remoteStream(GOOGLE_TTS_URL + '?ie=UTF-8&q=' + text + '&tl=' + lang + '&client=tw-ob'), { inputType: StreamType.Arbitrary });
+      resource = createAudioResource(await remoteStream(GOOGLE_TTS_URL + '?ie=UTF-8&q=' + text + '&tl=' + lang + '&client=tw-ob', item.settings.timeoutMs, item.settings.maxRemoteBytes), { inputType: StreamType.Arbitrary });
     } else if (item.settings.provider === 'polly') {
-      resource = createAudioResource(await remoteStream(POLLY_TTS_URL + '?voice=' + encodeURIComponent(item.settings.voice || 'Brian') + '&text=' + encodeURIComponent(item.text.slice(0, 200))), { inputType: StreamType.Arbitrary });
+      resource = createAudioResource(await remoteStream(POLLY_TTS_URL + '?voice=' + encodeURIComponent(item.settings.voice || 'Brian') + '&text=' + encodeURIComponent(item.text.slice(0, 200)), item.settings.timeoutMs, item.settings.maxRemoteBytes), { inputType: StreamType.Arbitrary });
     } else {
       throw new Error('Unsupported TTS provider: ' + item.settings.provider);
     }
-    if (!room.ttsConnection || room.ttsConnection.state.status === VoiceConnectionStatus.Destroyed) throw new Error('Voice connection is unavailable.');
+    if (generation !== (room.ttsGeneration || 0) || !room.ttsQueue?.length || room.ttsQueue[0] !== item) {
+      if (file) await fs.promises.rm(file, { force: true }).catch(() => {});
+      room.ttsPlaying = false;
+      return;
+    }
+    if (!room.ttsConnection || room.ttsConnection.state.status !== VoiceConnectionStatus.Ready) {
+      await ensureConnection(client, room);
+    }
+    if (generation !== (room.ttsGeneration || 0) || !room.ttsQueue?.length || room.ttsQueue[0] !== item) {
+      if (file) await fs.promises.rm(file, { force: true }).catch(() => {});
+      room.ttsPlaying = false;
+      return;
+    }
+    if (!room.ttsConnection || room.ttsConnection.state.status !== VoiceConnectionStatus.Ready) throw new Error('Voice connection is unavailable.');
     ensurePlayer(room,client);
-    await setBotMute(client,room,false);
+    if (!await setBotMute(client,room,false)) throw new Error('The bot could not unmute itself for TTS playback.');
+    if (generation !== (room.ttsGeneration || 0) || !room.ttsQueue?.length || room.ttsQueue[0] !== item) {
+      if (file) await fs.promises.rm(file, { force: true }).catch(() => {});
+      room.ttsPlaying = false;
+      return;
+    }
+    pauseMusicForTts(client, room);
     room.ttsConnection.subscribe(room.ttsPlayer);
+    room.ttsQueue.shift();
     room.ttsPlaying = true;
+    room.ttsCurrentItem = item;
+    room.ttsCurrentFile = file;
     room.ttsPlayer.play(resource);
-    if (file) setTimeout(() => fs.rm(file, { force: true }, () => {}), 120000);
   } catch (e) {
     console.error('[TempVC/TTS] Synthesis:', e?.stack || e?.message || e);
-    room.ttsQueue.shift();
+    const stillQueued = room.ttsQueue?.[0] === item && generation === (room.ttsGeneration || 0);
+    if (stillQueued) room.ttsQueue.shift();
+    if (room.ttsCurrentItem === item) room.ttsCurrentItem = null;
     room.ttsPlaying = false;
-    await playNext(room,client);
+    if (file) await fs.promises.rm(file, { force: true }).catch(() => {});
+    if (room.ttsCurrentFile === file) room.ttsCurrentFile = null;
     return;
   }
-  room.ttsQueue.shift();
 }
 
-async function speak(client, room, text, member) {
+async function pump(room, client) {
+  if (room.ttsPump) return room.ttsPump;
+  room.ttsPump = (async () => {
+    try {
+      await playNext(room, client);
+    } finally {
+      room.ttsPump = null;
+      if (!room.ttsPlaying && room.ttsQueue?.length) {
+        queueMicrotask(() => pump(room, client).catch(e => console.error('[TempVC/TTS] Queue restart:', e?.stack || e)));
+      }
+    }
+  })();
+  return room.ttsPump;
+}
+
+async function speak(client, room, text, member, overrides = {}) {
   const settings = { ...settingsFor(room, client) };
+  if (overrides.provider !== undefined) settings.provider = String(overrides.provider).toLowerCase();
+  if (overrides.lang !== undefined) settings.lang = String(overrides.lang);
+  if (overrides.voice !== undefined) settings.voice = String(overrides.voice);
+  if (!SUPPORTED_PROVIDERS.has(settings.provider)) throw new Error('Unsupported TTS provider: ' + settings.provider);
+  if (overrides.lang === undefined && settings.provider === 'google') settings.lang = 'en';
+  if (overrides.voice === undefined && settings.provider === 'polly') settings.voice = 'Brian';
   if (settings.enabled === false) throw new Error('TTS is disabled for this room.');
   let phrase = String(text || '').replace(/\s+/g, ' ').trim();
   if (!phrase) throw new Error('TTS text cannot be empty.');
-  const max = Math.max(20, Number(client.modules.get('voice')?.config?.tts?.maxCharacters || 500));
+  const configuredMax = Number(client.modules.get('voice')?.config?.tts?.maxCharacters);
+  const max = Number.isFinite(configuredMax) ? Math.max(1, Math.min(2000, configuredMax)) : 500;
   phrase = phrase.slice(0, max);
-  if (settings.prefixName && member?.displayName) phrase = member.displayName + ' says ' + phrase;
-  await ensureConnection(client, room);
-  ensurePlayer(room,client);
-  room.ttsQueue.push({ text: phrase, settings });
-  if (!room.ttsPlaying) await playNext(room,client);
+  if (settings.prefixName && member?.displayName) phrase = (member.displayName + ' says ' + phrase).slice(0, max);
+  const queueLimit = finiteConfigNumber(client.modules.get('voice')?.config?.tts?.maxQueueSize, 20, 1, 100);
+  if (!room.guildId || !room.voiceChannelId) throw new Error('Invalid temporary voice room state.');
+
+  const cooldownMs = finiteConfigNumber(client.modules.get('voice')?.config?.tts?.cooldownSeconds, 0, 0, 60) * 1000;
+  let cooldownUserId = null;
+  let cooldownSetAt = null;
+  if (cooldownMs > 0 && member?.id) {
+    if (!(room.ttsCooldowns instanceof Map)) room.ttsCooldowns = new Map();
+    const now = Date.now();
+    const previous = room.ttsCooldowns.get(member.id) || 0;
+    const remaining = cooldownMs - (now - previous);
+    if (remaining > 0) throw new Error('TTS cooldown active. Please wait ' + Math.ceil(remaining / 1000) + 's.');
+    cooldownUserId = member.id;
+    cooldownSetAt = now;
+    room.ttsCooldowns.set(member.id, now);
+    if (room.ttsCooldowns.size > 1000) {
+      for (const [id, at] of room.ttsCooldowns) {
+        if (now - at >= cooldownMs) room.ttsCooldowns.delete(id);
+        if (room.ttsCooldowns.size <= 1000) break;
+      }
+    }
+  }
+
+  room.ttsEnqueueCount = Number(room.ttsEnqueueCount || 0);
+  if ((room.ttsQueue?.length || 0) + room.ttsEnqueueCount >= queueLimit) {
+    if (cooldownUserId && room.ttsCooldowns?.get(cooldownUserId) === cooldownSetAt) room.ttsCooldowns.delete(cooldownUserId);
+    throw new Error('TTS queue is full. Please wait for the current speech to finish.');
+  }
+  room.ttsEnqueueCount += 1;
+
+  const generation = room.ttsGeneration || 0;
+  try {
+    await ensureConnection(client, room);
+    if (generation !== (room.ttsGeneration || 0)) throw new Error('TTS request was cancelled.');
+    ensurePlayer(room,client);
+    room.ttsQueue.push({ text: phrase, settings, requestedAt: Date.now(), requestHash: shortHash(sha256(JSON.stringify({ phrase, settings }))) });
+    if (!room.ttsPlaying) await pump(room,client);
+  } catch (e) {
+    if (cooldownUserId && room.ttsCooldowns?.get(cooldownUserId) === cooldownSetAt) room.ttsCooldowns.delete(cooldownUserId);
+    throw e;
+  } finally {
+    room.ttsEnqueueCount = Math.max(0, Number(room.ttsEnqueueCount || 0) - 1);
+  }
 }
 
 async function stop(room,client) {
   if (!room) return false;
+  room.ttsGeneration = (room.ttsGeneration || 0) + 1;
+  room.ttsCooldowns?.clear?.();
   room.ttsQueue = [];
   room.ttsPlaying = false;
+  room.ttsCurrentItem = null;
+  const currentFile = room.ttsCurrentFile;
+  room.ttsCurrentFile = null;
   room.ttsPlayer?.stop(true);
+  if (currentFile) await fs.promises.rm(currentFile, { force: true }).catch(() => {});
+  resumeMusicAfterTts(client, room);
   try{const guild=client?.guilds?.cache?.get(room.guildId);const me=await guild?.members.fetchMe().catch(()=>guild?.members.me);if(me?.voice?.channelId===room.voiceChannelId&&me.voice.serverMute!==true)await me.voice.setMute(true,'Room TTS stopped');}catch{}
   return true;
 }

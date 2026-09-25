@@ -34,9 +34,12 @@ tts:
   panelEditable: true
   autoTts: false
   maxCharacters: 500
+  maxQueueSize: 20
   maxRate: 100
   outputFormat: audio-24khz-96kbitrate-mono-mp3
   timeoutMs: 15000
+  maxAudioBytes: 8388608
+  maxRemoteBytes: 8388608
   maxVolume: 100
   cooldownSeconds: 3
   allowUserVoiceSelection: true
@@ -81,6 +84,8 @@ temporaryVoice:
   syncPermissions: true
   maxBitrate: 384000
   cleanupIntervalSeconds: 30
+  emptyRoomGraceSeconds: 300
+  recoveryGraceSeconds: 600
 
 branding:
   panelTitle: "Voice Control"

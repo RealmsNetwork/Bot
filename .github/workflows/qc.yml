@@ -24,6 +24,8 @@ jobs:
         run: node -e "const fs=require('fs'); const dirs=fs.readdirSync('modules',{withFileTypes:true}).filter(x=>x.isDirectory()); const missing=dirs.filter(x=>!fs.existsSync('modules/'+x.name+'/advanced.yml')); if(missing.length){console.error('Missing advanced.yml:',missing);process.exit(1)} console.log('advanced.yml present for '+dirs.length+' modules')"
       - name: Syntax and configuration QC
         run: npm run check
+      - name: Voice TTS regression tests
+        run: npm test
       - name: Runtime import smoke test
         run: node -e "require('./lib/database'); require('./lib/config'); require('./lib/module-loader'); require('./lib/custom-dsl'); console.log('Core imports ok')"
       - name: Validate package metadata

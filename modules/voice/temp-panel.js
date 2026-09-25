@@ -10,15 +10,114 @@ const {
   ModalBuilder,
   TextInputBuilder,
   TextInputStyle,
-  PermissionFlagsBits
+  PermissionFlagsBits,
+  MessageFlags
 } = require('discord.js');
 const tts = require('./tts-service');
 
 let cleanupTimer = null;
+let cleanupRunning = false;
 const selections = new Map();
+const SELECTION_TTL_MS = 10 * 60 * 1000;
+const MAX_SELECTIONS = 5000;
+const PANEL_TOPIC_PREFIX = 'RealmsNetwork temporary VC panel v2 | ';
+const LEGACY_PANEL_TOPIC_PREFIX = 'RealmsNetwork temporary VC panel | ';
 
 function cfg(client) { return client.modules.get('voice')?.config || {}; }
 function tc(client) { return cfg(client).temporaryVoice || {}; }
+function stateKey(room) { return 'tempvc:' + room.voiceChannelId; }
+
+function roomSnapshot(room) {
+  return {
+    version: 1,
+    ownerId: room.ownerId,
+    panelMessageId: /^\d{17,20}$/.test(String(room.panelMessageId || '')) ? String(room.panelMessageId) : null,
+    accessUsers: [...(room.accessUsers || [])],
+    accessRoles: [...(room.accessRoles || [])],
+    bannedUsers: [...(room.bannedUsers || [])],
+    locked: !!room.locked,
+    hidden: !!room.hidden,
+    operatorControls: room.operatorControls !== false,
+    syncPermissions: room.syncPermissions !== false,
+    emptySince: Number.isFinite(Number(room.emptySince)) ? Number(room.emptySince) : null,
+    tts: {
+      provider: room.tts?.provider,
+      voice: room.tts?.voice,
+      lang: room.tts?.lang,
+      rate: room.tts?.rate,
+      volume: room.tts?.volume,
+      enabled: room.tts?.enabled,
+      autoTts: room.tts?.autoTts,
+      prefixName: room.tts?.prefixName
+    }
+  };
+}
+
+function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
+
+async function persistRoom(client, room) {
+  if (!client?.db?.set || !room?.guildId || !room?.voiceChannelId) return true;
+  const desired = JSON.stringify(roomSnapshot(room));
+  if (!room.persistenceDirty && room._persistedSnapshot === desired) return true;
+  if (room._persistPromise) return room._persistPromise;
+
+  const promise = (async () => {
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      const snapshot = roomSnapshot(room);
+      const serialized = JSON.stringify(snapshot);
+      try {
+        await client.db.set(room.guildId, stateKey(room), snapshot);
+        room._persistedSnapshot = serialized;
+        room.persistenceDirty = false;
+        if (JSON.stringify(roomSnapshot(room)) !== serialized) {
+          room.persistenceDirty = true;
+          if (attempt < 3) { await sleep(50); continue; }
+          return false;
+        }
+        return true;
+      } catch (e) {
+        room.persistenceDirty = true;
+        if (attempt === 3) {
+          console.error('[TempVC] Failed to persist room state after 3 attempts:', e?.message || e);
+          return false;
+        }
+        await sleep(250 * 2 ** (attempt - 1));
+      }
+    }
+    return false;
+  })();
+
+  room._persistPromise = promise;
+  try { return await promise; }
+  finally { if (room._persistPromise === promise) room._persistPromise = null; }
+}
+
+async function deletePersistedRoom(client, room) {
+  if (!client?.db?.delete || !room?.guildId || !room?.voiceChannelId) return true;
+  for(let attempt=1;attempt<=3;attempt++){
+    try{
+      await client.db.delete(room.guildId,stateKey(room));
+      return true;
+    }catch(e){
+      if(attempt===3){
+        console.error('[TempVC] Failed to delete room state after 3 attempts:',e?.message||e);
+        return false;
+      }
+      await sleep(250*2**(attempt-1));
+    }
+  }
+  return false;
+}
+
+function emptyGraceMs(client) {
+  const seconds = Number(tc(client).emptyRoomGraceSeconds);
+  return (Number.isFinite(seconds) ? Math.max(0, Math.min(86400, seconds)) : 300) * 1000;
+}
+
+function recoveryGraceMs(client) {
+  const seconds = Number(tc(client).recoveryGraceSeconds);
+  return (Number.isFinite(seconds) ? Math.max(0, Math.min(86400, seconds)) : 600) * 1000;
+}
 
 function brand(client) {
   const b = client.config.branding || {};
@@ -29,8 +128,16 @@ function brand(client) {
   };
 }
 
+function validSnowflake(value) {
+  return /^\d{17,20}$/.test(String(value || ''));
+}
+
+function cleanIdSet(values) {
+  return new Set([...(values || [])].map(String).filter(validSnowflake));
+}
+
 function panelSlug(client, name) {
-  const suffix = String(tc(client).panelSuffix || '-panel');
+  const suffix = String(tc(client).panelSuffix || '-panel').slice(0, 99);
   const raw = String(name || 'room')
     .toLowerCase()
     .normalize('NFKD')
@@ -38,18 +145,19 @@ function panelSlug(client, name) {
     .trim()
     .replace(/\s+/g, '-')
     .replace(/-+/g, '-');
-  const base = (raw || 'room').slice(0, Math.max(1, 100 - suffix.length));
+  const maxBaseLength = Math.max(1, 100 - suffix.length);
+  const base = (raw || 'room').slice(0, maxBaseLength);
   return base + suffix;
 }
 
 function normalizeRoom(room, client) {
-  room.accessUsers = room.accessUsers instanceof Set ? room.accessUsers : new Set(room.accessUsers || []);
-  room.accessRoles = room.accessRoles instanceof Set ? room.accessRoles : new Set(room.accessRoles || []);
-  room.bannedUsers = room.bannedUsers instanceof Set ? room.bannedUsers : new Set(room.bannedUsers || []);
-  room.accessUsers.add(room.ownerId);
+  room.accessUsers = cleanIdSet(room.accessUsers instanceof Set ? room.accessUsers : room.accessUsers || []);
+  room.accessRoles = cleanIdSet(room.accessRoles instanceof Set ? room.accessRoles : room.accessRoles || []);
+  room.bannedUsers = cleanIdSet(room.bannedUsers instanceof Set ? room.bannedUsers : room.bannedUsers || []);
+  if(validSnowflake(room.ownerId))room.accessUsers.add(String(room.ownerId));
   room.page = room.page || 'overview';
   room.tts = tts.settingsFor(room, client);
-  if (room.operatorControls === undefined) room.operatorControls = tc(client).panelAccessCanControl !== false;
+  if (room.operatorControls === undefined) room.operatorControls = tc(client).ownerOnlyControl !== true && tc(client).panelAccessCanControl !== false;
   if (room.syncPermissions === undefined) room.syncPermissions = tc(client).syncPermissions !== false;
   room.ttsBrowser = room.ttsBrowser || { kind: null, page: 0 };
   return room;
@@ -61,25 +169,140 @@ function roomFromPanel(channelId, rooms) {
 }
 
 function selectionKey(interaction, kind) {
-  return interaction.guildId + ':' + interaction.user.id + ':' + kind;
+  return interaction.guildId + ':' + interaction.channelId + ':' + interaction.user.id + ':' + kind;
 }
 
 function selected(interaction, kind) {
-  return selections.get(selectionKey(interaction, kind));
+  const key = selectionKey(interaction, kind);
+  const entry = selections.get(key);
+  if (!entry) return null;
+  if (Date.now() - entry.at > SELECTION_TTL_MS) {
+    selections.delete(key);
+    return null;
+  }
+  return entry.value;
+}
+
+function rememberSelection(interaction, kind, value) {
+  const now = Date.now();
+  selections.set(selectionKey(interaction, kind), { value, at: now });
+  if (selections.size <= MAX_SELECTIONS) return;
+  for (const [key, entry] of selections) {
+    if (now - entry.at > SELECTION_TTL_MS) selections.delete(key);
+    if (selections.size <= MAX_SELECTIONS) break;
+  }
+  while (selections.size > MAX_SELECTIONS) {
+    const oldest = selections.keys().next().value;
+    if (oldest === undefined) break;
+    selections.delete(oldest);
+  }
+}
+
+async function panelNotice(interaction, content) {
+  const payload = { content, flags: MessageFlags.Ephemeral };
+  if (interaction.deferred || interaction.replied) return interaction.followUp(payload).catch(() => {});
+  return interaction.reply(payload).catch(() => {});
+}
+
+async function deferPanelInteraction(interaction) {
+  if (interaction.deferred || interaction.replied) return true;
+  try {
+    await interaction.deferUpdate();
+    return true;
+  } catch (e) {
+    console.error('[TempVC/Panel] deferUpdate:', e?.message || e);
+    return false;
+  }
 }
 
 function canAccess(interaction, room) {
   normalizeRoom(room, interaction.client);
   if (!interaction.member) return false;
+  if (room.bannedUsers.has(interaction.user.id)) return false;
   if (interaction.user.id === room.ownerId || room.accessUsers.has(interaction.user.id)) return true;
   return [...room.accessRoles].some(id => interaction.member.roles?.cache?.has(id));
 }
 
-function ownerOnlyAction(action) {
-  return ['claim','delete','reset-access','transfer-selected'].includes(action);
+function canControlTts(interaction, room, client) {
+  if (!interaction?.user?.id || !room) return false;
+  normalizeRoom(room, client);
+  if (room.bannedUsers.has(interaction.user.id)) return false;
+  const c = tc(client);
+  if (c.allowOwnerTts === false) return false;
+  if (c.ownerOnlyControl === true || room.operatorControls === false) return interaction.user.id === room.ownerId;
+  if (interaction.user.id === room.ownerId) return true;
+  if (room.accessUsers.has(interaction.user.id)) return true;
+  return [...room.accessRoles].some(id => interaction.member?.roles?.cache?.has(id));
 }
 
+function ownerOnlyAction(action) {
+  return [
+    'claim','delete','reset-access','transfer-selected','grant-user','revoke-user',
+    'grant-role','revoke-role','panel-selected','revoke-panel-selected',
+    'toggle-sync','toggle-operators','reset-room','disconnect-bot'
+  ].includes(action);
+}
+
+function actionEnabled(client, action) {
+  const c = tc(client);
+  const ttsConfig = cfg(client).tts || {};
+  const ttsDisabled = ttsConfig.panelEditable === false || c.allowOwnerTts === false || c.panelAllowTtsControl === false;
+  const voiceSelectionDisabled = ttsDisabled || ttsConfig.allowUserVoiceSelection === false;
+  const disabled = new Set([
+    ['rename', c.allowOwnerRename === false],
+    ['limit', c.allowOwnerLimit === false],
+    ['bitrate', c.allowOwnerBitrate === false],
+    ['lock', c.allowOwnerLock === false],
+    ['unlock', c.allowOwnerUnlock === false],
+    ['hide', c.allowOwnerHide === false],
+    ['unhide', c.allowOwnerUnhide === false],
+    ['claim', c.allowOwnerClaim === false],
+    ['transfer-selected', c.allowOwnerTransfer === false],
+    ['kick', c.allowOwnerKick === false],
+    ['mute', c.allowOwnerMute === false],
+    ['unmute', c.allowOwnerMute === false],
+    ['deafen', c.allowOwnerDeafen === false],
+    ['undeafen', c.allowOwnerDeafen === false],
+    ['ban', c.allowOwnerBan === false],
+    ['unban', c.allowOwnerBan === false],
+    ['tts-enable', ttsDisabled],
+    ['tts-disable', ttsDisabled],
+    ['autotts-enable', ttsDisabled],
+    ['autotts-disable', ttsDisabled],
+    ['prefix-enable', ttsDisabled],
+    ['prefix-disable', ttsDisabled],
+    ['tts-stop', ttsDisabled],
+    ['speak', ttsDisabled],
+    ['volume', ttsDisabled],
+    ['rate-down', ttsDisabled],
+    ['rate-up', ttsDisabled],
+    ['tts-voices', voiceSelectionDisabled],
+    ['tts-languages', voiceSelectionDisabled],
+    ['tts-voice-manual', voiceSelectionDisabled],
+    ['tts-provider', ttsDisabled],
+    ['tts-language', voiceSelectionDisabled],
+    ['tts-voice', voiceSelectionDisabled],
+    ['grant-user', c.panelAllowUserAccess === false],
+    ['revoke-user', c.panelAllowUserAccess === false],
+    ['panel-selected', c.panelAllowUserAccess === false],
+    ['revoke-panel-selected', c.panelAllowUserAccess === false],
+    ['grant-role', c.panelAllowRoleAccess === false],
+    ['revoke-role', c.panelAllowRoleAccess === false]
+  ]);
+  const entry = [...disabled].find(([name]) => name === action);
+  return !entry?.[1];
+}
+
+const TTS_CONTROL_ACTIONS = new Set([
+  'tts-enable','tts-disable','autotts-enable','autotts-disable',
+  'prefix-enable','prefix-disable','tts-stop','speak','volume',
+  'rate-down','rate-up','tts-voices','tts-languages','tts-voice-manual',
+  'tts-provider','tts-language','tts-voice'
+]);
+
 function canControl(interaction, room, client, action) {
+  if (!actionEnabled(client, action)) return false;
+  if (TTS_CONTROL_ACTIONS.has(action)) return canControlTts(interaction, room, client);
   if (interaction.user.id === room.ownerId) return true;
   if (ownerOnlyAction(action)) return false;
   return room.operatorControls !== false;
@@ -404,6 +627,8 @@ function buildPayload(client, room, extras = {}) {
 
 async function refresh(client, room, page = room.page || 'overview') {
   normalizeRoom(room,client);
+  if(room.permissionsDirty)throw new Error('Temporary VC permissions are out of sync. Synchronize permissions before refreshing the panel.');
+  if (!(await persistRoom(client,room))) throw new Error('Temporary VC state could not be persisted. The change was not safely confirmed.');
   room.page=page;
   const guild=client.guilds.cache.get(room.guildId);
   const panel=guild?.channels.cache.get(room.panelChannelId);
@@ -426,11 +651,28 @@ async function refresh(client, room, page = room.page || 'overview') {
       const msg=await panel.messages.fetch(room.panelMessageId);
       await msg.edit(p);
       return msg;
-    }catch{}
+    }catch(e){
+      if(e?.code !== 10008){
+        console.error('[TempVC/Panel] Failed to edit panel:',e?.message||e);
+        return null;
+      }
+    }
   }
-  const msg=await panel.send(p);
-  room.panelMessageId=msg.id;
-  return msg;
+  try{
+    const msg=await panel.send(p);
+    room.panelMessageId=msg.id;
+    try{
+      if(!(await persistRoom(client,room)))throw new Error('Panel message identity could not be durably saved.');
+    }catch(e){
+      room.panelMessageId=null;
+      await msg.delete().catch(()=>{});
+      throw e;
+    }
+    return msg;
+  }catch(e){
+    console.error('[TempVC/Panel] Failed to send panel:',e?.message||e);
+    throw e;
+  }
 }
 
 function panelOverwrites(guild,ownerId){
@@ -449,7 +691,7 @@ async function create(client,member,voice,room){
     name:panelSlug(client,voice.name),
     type:ChannelType.GuildText,
     parent:c.categoryId || voice.parentId || undefined,
-    topic:'RealmsNetwork temporary VC panel | owner='+member.id+' | voice='+voice.id,
+    topic:PANEL_TOPIC_PREFIX+'owner='+member.id+' | voice='+voice.id,
     permissionOverwrites:panelOverwrites(guild,member.id),
     reason:'Create temporary voice room control panel'
   });
@@ -463,59 +705,157 @@ async function create(client,member,voice,room){
 }
 
 async function deleteRoom(client,rooms,room,guild,reason='Temporary voice room deleted'){
-  if(!room)return;
-  rooms.delete(room.voiceChannelId);
-  tts.stop(room,client);
-  room.ttsConnection?.destroy?.();
+  if(!room||room.deleting)return;
+  room.deleting=true;
+  await tts.stop(room,client);
+  const session=client.voiceSessions?.get(guild.id);
+  if(session?.connection===room.ttsConnection){
+    session.queue=[];
+    session.current=null;
+    session.player?.stop(true);
+    session.connection?.destroy?.();
+    session.connection=null;
+  }else{
+    room.ttsConnection?.destroy?.();
+  }
+  room.ttsConnection=null;
   const panel=room.panelChannelId&&guild.channels.cache.get(room.panelChannelId);
   const voice=guild.channels.cache.get(room.voiceChannelId);
-  await panel?.delete(reason).catch(()=>{});
+  let panelDeleted=!panel;
+  let voiceDeleted=!voice;
+
+  if(panel){
+    panelDeleted=!!await panel.delete(reason).then(()=>true).catch(e=>{console.error('[TempVC] Failed to delete panel:',e?.message||e);return false;});
+  }
   if(voice&&voice.members.size){
     for(const member of voice.members.values())if(!member.user.bot)await member.voice.disconnect(reason).catch(()=>{});
   }
-  await voice?.delete(reason).catch(()=>{});
+  if(voice){
+    voiceDeleted=!!await voice.delete(reason).then(()=>true).catch(e=>{console.error('[TempVC] Failed to delete voice room:',e?.message||e);return false;});
+  }
+
+  if(panelDeleted&&voiceDeleted){
+    rooms.delete(room.voiceChannelId);
+    await deletePersistedRoom(client,room);
+  }else{
+    room.deleting=false;
+  }
+}
+
+function permissionPatch(overwrite, permissions) {
+  return Object.fromEntries(permissions.map(([name, flag]) => [
+    name,
+    !overwrite ? null : overwrite.allow.has(flag) ? true : overwrite.deny.has(flag) ? false : null
+  ]));
 }
 
 async function syncPermissions(room,guild,client){
   normalizeRoom(room,client);
-  const voice=guild.channels.cache.get(room.voiceChannelId);
-  const panel=guild.channels.cache.get(room.panelChannelId);
-  if(!voice||!panel)return;
-  for(const id of room.accessUsers){
-    if(room.bannedUsers.has(id))continue;
-    await panel.permissionOverwrites.edit(id,{ViewChannel:true,ReadMessageHistory:true,SendMessages:false}).catch(()=>{});
-    await voice.permissionOverwrites.edit(id,{ViewChannel:true,Connect:true,Speak:true}).catch(()=>{});
-  }
-  for(const id of room.accessRoles){
-    await panel.permissionOverwrites.edit(id,{ViewChannel:true,ReadMessageHistory:true,SendMessages:false}).catch(()=>{});
-    await voice.permissionOverwrites.edit(id,{ViewChannel:true,Connect:true,Speak:true}).catch(()=>{});
-  }
-  for(const id of room.bannedUsers)await voice.permissionOverwrites.edit(id,{ViewChannel:false,Connect:false}).catch(()=>{});
+  if(room.permissionSyncPromise)return room.permissionSyncPromise;
+  const promise=(async()=>{
+    const voice=guild.channels.cache.get(room.voiceChannelId);
+    const panel=guild.channels.cache.get(room.panelChannelId);
+    if(!voice||!panel)throw new Error('Temporary VC permission targets no longer exist.');
+    for(let attempt=1;attempt<=3;attempt++){
+      const before=JSON.stringify({
+        accessUsers:[...room.accessUsers].sort(),
+        accessRoles:[...room.accessRoles].sort(),
+        bannedUsers:[...room.bannedUsers].sort()
+      });
+      try{
+        for(const id of room.accessUsers){
+          if(room.bannedUsers.has(id))continue;
+          await panel.permissionOverwrites.edit(id,{ViewChannel:true,ReadMessageHistory:true,SendMessages:false});
+          await voice.permissionOverwrites.edit(id,{ViewChannel:true,Connect:true,Speak:true});
+        }
+        for(const id of room.accessRoles){
+          await panel.permissionOverwrites.edit(id,{ViewChannel:true,ReadMessageHistory:true,SendMessages:false});
+          await voice.permissionOverwrites.edit(id,{ViewChannel:true,Connect:true,Speak:true});
+        }
+        for(const id of room.bannedUsers){
+          await voice.permissionOverwrites.edit(id,{ViewChannel:false,Connect:false});
+        }
+        const after=JSON.stringify({
+          accessUsers:[...room.accessUsers].sort(),
+          accessRoles:[...room.accessRoles].sort(),
+          bannedUsers:[...room.bannedUsers].sort()
+        });
+        if(after!==before){
+          room.permissionsDirty=true;
+          if(attempt===3)throw new Error('Temporary VC permissions changed while synchronization was in progress.');
+          await sleep(50);
+          continue;
+        }
+        room.permissionsDirty=false;
+        return true;
+      }catch(e){
+        room.permissionsDirty=true;
+        if(attempt===3){
+          console.error('[TempVC] Permission synchronization failed after 3 attempts:',e?.message||e);
+          throw e;
+        }
+        await sleep(250*2**(attempt-1));
+      }
+    }
+    return false;
+  })();
+  room.permissionSyncPromise=promise;
+  try{return await promise;}
+  finally{if(room.permissionSyncPromise===promise)room.permissionSyncPromise=null;}
 }
 
 async function grant(room,guild,id,type,client){
   normalizeRoom(room,client);
   if(room.bannedUsers.has(id))throw new Error('Unban that member before granting access.');
+  const targetSet=type==='role'?room.accessRoles:room.accessUsers;
   if(type==='role'){
     const role=guild.roles.cache.get(id);
     if(!role||role.managed||id===guild.roles.everyone.id)throw new Error('That role cannot be granted.');
     if(tc(client).panelAllowRoleAccess===false)throw new Error('Role access is disabled.');
-    room.accessRoles.add(id);
   }else{
     const member=guild.members.cache.get(id)||await guild.members.fetch(id).catch(()=>null);
     if(!member||member.user.bot)throw new Error('That user cannot be granted.');
     if(tc(client).panelAllowUserAccess===false)throw new Error('User access is disabled.');
-    room.accessUsers.add(id);
   }
-  await syncPermissions(room,guild,client);
+  const hadAccess=targetSet.has(id);
+  const panel=guild.channels.cache.get(room.panelChannelId);
+  const voice=guild.channels.cache.get(room.voiceChannelId);
+  const panelBefore=panel?.permissionOverwrites.cache.get(id);
+  const voiceBefore=voice?.permissionOverwrites.cache.get(id);
+  if(!panel)throw new Error('Temporary VC control panel no longer exists.');
+  targetSet.add(id);
+  try{
+    if(room.syncPermissions!==false)await syncPermissions(room,guild,client);
+    else await panel.permissionOverwrites.edit(id,{ViewChannel:true,ReadMessageHistory:true,SendMessages:false});
+  }catch(e){
+    if(!hadAccess){
+      targetSet.delete(id);
+      await panel?.permissionOverwrites.edit(id,permissionPatch(panelBefore,[['ViewChannel',PermissionFlagsBits.ViewChannel],['ReadMessageHistory',PermissionFlagsBits.ReadMessageHistory],['SendMessages',PermissionFlagsBits.SendMessages]])).catch(()=>{});
+      if(room.syncPermissions!==false)await voice?.permissionOverwrites.edit(id,permissionPatch(voiceBefore,[['ViewChannel',PermissionFlagsBits.ViewChannel],['Connect',PermissionFlagsBits.Connect],['Speak',PermissionFlagsBits.Speak]])).catch(()=>{});
+    }
+    throw e;
+  }
 }
 
 async function revoke(room,guild,id,type,client){
   normalizeRoom(room,client);
   if(id===room.ownerId)throw new Error('The owner cannot be removed from panel access.');
-  if(type==='role')room.accessRoles.delete(id);else room.accessUsers.delete(id);
-  await guild.channels.cache.get(room.panelChannelId)?.permissionOverwrites.delete(id).catch(()=>{});
-  if(room.syncPermissions!==false)await guild.channels.cache.get(room.voiceChannelId)?.permissionOverwrites.delete(id).catch(()=>{});
+  const targetSet=type==='role'?room.accessRoles:room.accessUsers;
+  const hadAccess=targetSet.has(id);
+  if(!hadAccess)return;
+  const panel=guild.channels.cache.get(room.panelChannelId);
+  const voice=guild.channels.cache.get(room.voiceChannelId);
+  const panelBefore=panel?.permissionOverwrites.cache.get(id);
+  const voiceBefore=voice?.permissionOverwrites.cache.get(id);
+  try{
+    await panel?.permissionOverwrites.edit(id,{ViewChannel:null,ReadMessageHistory:null,SendMessages:null});
+    if(room.syncPermissions!==false)await voice?.permissionOverwrites.edit(id,{ViewChannel:null,Connect:null,Speak:null});
+    targetSet.delete(id);
+  }catch(e){
+    await panel?.permissionOverwrites.edit(id,permissionPatch(panelBefore,[['ViewChannel',PermissionFlagsBits.ViewChannel],['ReadMessageHistory',PermissionFlagsBits.ReadMessageHistory],['SendMessages',PermissionFlagsBits.SendMessages]])).catch(()=>{});
+    if(room.syncPermissions!==false)await voice?.permissionOverwrites.edit(id,permissionPatch(voiceBefore,[['ViewChannel',PermissionFlagsBits.ViewChannel],['Connect',PermissionFlagsBits.Connect],['Speak',PermissionFlagsBits.Speak]])).catch(()=>{});
+    throw e;
+  }
 }
 
 async function showForm(interaction,kind){
@@ -535,18 +875,37 @@ async function getMember(interaction){
   return interaction.guild.members.cache.get(id)||await interaction.guild.members.fetch(id).catch(()=>null);
 }
 
+function targetIsInRoom(member, room) {
+  return member?.voice?.channelId === room.voiceChannelId;
+}
+
+async function panelUpdate(interaction,client,room,page){
+  if(!interaction.deferred&&!interaction.replied){
+    if(!(await deferPanelInteraction(interaction)))return null;
+  }
+  const msg=await refresh(client,room,page);
+  if(!msg)return interaction.editReply({content:'The temporary VC panel is no longer available.',embeds:[],components:[]}).catch(e=>console.error('[TempVC/Panel] editReply:',e?.message||e));
+  return msg;
+}
+
 async function handleButton(interaction,client,rooms){
   const room=roomFromPanel(interaction.channelId,rooms);
-  if(!room||!canAccess(interaction,room))return interaction.reply({content:'You do not have access to this panel.',ephemeral:true});
+  if(!room||!canAccess(interaction,room))return interaction.reply({content:'You do not have access to this panel.',flags:MessageFlags.Ephemeral});
   normalizeRoom(room,client);
   const action=interaction.customId.slice('rn-tvc:'.length);
-  if(!canControl(interaction,room,client,action))return interaction.reply({content:'Only the room owner can use that control.',ephemeral:true});
+  if(!canControl(interaction,room,client,action))return panelNotice(interaction,'Only the room owner can use that control.');
 
-  if(['overview','room','members','moderation','access','tts','permissions','utilities','danger'].includes(action))return interaction.update(await refresh(client,room,action));
-  if(action==='refresh')return interaction.update(await refresh(client,room,room.page));
+  const modalActions=['rename','limit','bitrate','region','slowmode','rate','volume','speak','tts-voice-manual'];
+  if(modalActions.includes(action))return showForm(interaction,action);
+  if(action==='delete')return interaction.showModal(new ModalBuilder().setCustomId('rn-tvc-modal:delete').setTitle('Delete Temporary Room').addComponents(
+    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('value').setLabel('Type DELETE to confirm').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(6))
+  ));
+  if(!(await deferPanelInteraction(interaction)))return;
+  if(['overview','room','members','moderation','access','tts','permissions','utilities','danger'].includes(action))return panelUpdate(interaction,client,room,action);
+  if(action==='refresh')return panelUpdate(interaction,client,room,room.page);
   if(action==='tts-voices'||action==='tts-languages'){
     room.ttsBrowser={kind:action==='tts-voices'?'voices':'languages',page:0};
-    return interaction.update(await refresh(client,room,action));
+    return panelUpdate(interaction,client,room,action);
   }
   if(action.startsWith('voice-')||action.startsWith('lang-')){
     const kind=action.startsWith('voice-')?'voices':'languages';
@@ -559,22 +918,32 @@ async function handleButton(interaction,client,rooms){
     else if(action===prefix+'next')p=Math.min(pages-1,p+1);
     else if(action===prefix+'last')p=pages-1;
     room.ttsBrowser={kind,page:p};
-    return interaction.update(await refresh(client,room,kind==='voices'?'tts-voices':'tts-languages'));
+    return panelUpdate(interaction,client,room,kind==='voices'?'tts-voices':'tts-languages');
   }
 
   const guild=interaction.guild;
   const voice=guild.channels.cache.get(room.voiceChannelId);
   const c=tc(client);
-  const member=await getMember(interaction);
+  if(!voice)return panelNotice(interaction,'The voice room no longer exists.');
+  const memberActions=new Set(['kick','ban','unban','mute','unmute','deafen','undeafen','transfer-selected','panel-selected','revoke-panel-selected']);
+  const member=memberActions.has(action)?await getMember(interaction):null;
 
-  if(['rename','limit','bitrate','region','slowmode','rate','volume','speak','tts-voice-manual'].includes(action))return showForm(interaction,action);
-  if(!voice&&action!=='delete')return interaction.reply({content:'The voice room no longer exists.',ephemeral:true});
-
-  if(action==='lock'){room.locked=true;await voice.permissionOverwrites.edit(guild.roles.everyone,{Connect:false});}
-  else if(action==='unlock'){room.locked=false;await voice.permissionOverwrites.edit(guild.roles.everyone,{Connect:true});}
-  else if(action==='hide'){room.hidden=true;await voice.permissionOverwrites.edit(guild.roles.everyone,{ViewChannel:false});}
-  else if(action==='unhide'){room.hidden=false;await voice.permissionOverwrites.edit(guild.roles.everyone,{ViewChannel:true});}
-  else if(action==='reset-room'){room.locked=false;room.hidden=false;await voice.permissionOverwrites.edit(guild.roles.everyone,{Connect:true,ViewChannel:true});await voice.setUserLimit(0);await voice.setBitrate(Math.min(64000,Number(c.maxBitrate)||384000)).catch(()=>{});}
+  if(action==='lock'){await voice.permissionOverwrites.edit(guild.roles.everyone,{Connect:false});room.locked=true;}
+  else if(action==='unlock'){await voice.permissionOverwrites.edit(guild.roles.everyone,{Connect:true});room.locked=false;}
+  else if(action==='hide'){await voice.permissionOverwrites.edit(guild.roles.everyone,{ViewChannel:false});room.hidden=true;}
+  else if(action==='unhide'){await voice.permissionOverwrites.edit(guild.roles.everyone,{ViewChannel:true});room.hidden=false;}
+  else if(action==='reset-room'){
+    const defaultLocked=c.defaultLocked===true;
+    const defaultHidden=c.defaultHidden===true;
+    await voice.permissionOverwrites.edit(guild.roles.everyone,{Connect:defaultLocked?false:true,ViewChannel:defaultHidden?false:true});
+    const configuredLimit=Number(c.userLimit);
+    await voice.setUserLimit(Number.isInteger(configuredLimit)?Math.max(0,Math.min(99,configuredLimit)):0);
+    const configuredBitrate=Number(c.bitrate);
+    const maxBitrate=Math.max(8000,Math.min(384000,Number(c.maxBitrate)||384000));
+    await voice.setBitrate(configuredBitrate>0?Math.min(configuredBitrate,maxBitrate):Math.min(64000,maxBitrate));
+    room.locked=defaultLocked;
+    room.hidden=defaultHidden;
+  }
   else if(action==='quality'){
     const cur=String(voice.videoQualityMode||'auto').toLowerCase();
     const next=cur==='auto'?'full':'auto';
@@ -582,122 +951,189 @@ async function handleButton(interaction,client,rooms){
   }
   else if(action==='invite'){
     const invite=await voice.createInvite({maxAge:86400,maxUses:0,unique:true,reason:'Temporary VC invite'});
-    return interaction.reply({content:'Invite created: '+invite.url,ephemeral:true});
+    return panelNotice(interaction,'Invite created: '+invite.url);
   }
   else if(action==='kick'){
-    if(!member||member.id===interaction.user.id)return interaction.reply({content:'Select another member first.',ephemeral:true});
+    if(!member||member.id===interaction.user.id)return panelNotice(interaction,'Select another member first.');
+    if(!targetIsInRoom(member,room))return panelNotice(interaction,'That member is not in this temporary voice room.');
     await member.voice.disconnect('Temporary VC kick');
   }
   else if(action==='ban'){
-    if(!member||member.id===interaction.user.id)return interaction.reply({content:'Select another member first.',ephemeral:true});
+    if(!member||member.id===interaction.user.id)return panelNotice(interaction,'Select another member first.');
+    await voice.permissionOverwrites.edit(member.id,{ViewChannel:false,Connect:false});
     room.bannedUsers.add(member.id);
     room.accessUsers.delete(member.id);
-    await voice.permissionOverwrites.edit(member.id,{ViewChannel:false,Connect:false});
-    await guild.channels.cache.get(room.panelChannelId)?.permissionOverwrites.delete(member.id).catch(()=>{});
-    await member.voice.disconnect('Banned from temporary VC').catch(()=>{});
+    await guild.channels.cache.get(room.panelChannelId)?.permissionOverwrites.edit(member.id,{ViewChannel:null,ReadMessageHistory:null,SendMessages:null}).catch(e=>console.error('[TempVC/Panel] Failed to remove banned panel access:',e?.message||e));
+    if(targetIsInRoom(member,room))await member.voice.disconnect('Banned from temporary VC').catch(()=>{});
   }
   else if(action==='unban'){
-    if(!member)return interaction.reply({content:'Select a member first.',ephemeral:true});
+    if(!member)return panelNotice(interaction,'Select a member first.');
+    await voice.permissionOverwrites.edit(member.id,{ViewChannel:null,Connect:null});
     room.bannedUsers.delete(member.id);
-    await voice.permissionOverwrites.delete(member.id).catch(()=>{});
   }
   else if(action==='mute'||action==='unmute'){
-    if(!member||member.id===interaction.user.id)return interaction.reply({content:'Select another member first.',ephemeral:true});
+    if(!member||member.id===interaction.user.id)return panelNotice(interaction,'Select another member first.');
+    if(!targetIsInRoom(member,room))return panelNotice(interaction,'That member is not in this temporary voice room.');
     await member.voice.setMute(action==='mute','Temporary VC moderation');
   }
   else if(action==='deafen'||action==='undeafen'){
-    if(!member||member.id===interaction.user.id)return interaction.reply({content:'Select another member first.',ephemeral:true});
+    if(!member||member.id===interaction.user.id)return panelNotice(interaction,'Select another member first.');
+    if(!targetIsInRoom(member,room))return panelNotice(interaction,'That member is not in this temporary voice room.');
     await member.voice.setDeaf(action==='deafen','Temporary VC moderation');
   }
   else if(action==='transfer-selected'){
-    if(!member)return interaction.reply({content:'Select a member first.',ephemeral:true});
-    if(room.bannedUsers.has(member.id))return interaction.reply({content:'That member is banned from the room.',ephemeral:true});
-    room.ownerId=member.id;room.accessUsers.add(member.id);room.operatorControls=room.operatorControls!==false;
-    await voice.permissionOverwrites.edit(member.id,{ViewChannel:true,Connect:true,Speak:true});
-    await guild.channels.cache.get(room.panelChannelId)?.permissionOverwrites.edit(member.id,{ViewChannel:true,ReadMessageHistory:true,SendMessages:false});
+    if(!member)return panelNotice(interaction,'Select a member first.');
+    if(member.user.bot)return panelNotice(interaction,'A bot cannot own a temporary voice room.');
+    if(!targetIsInRoom(member,room))return panelNotice(interaction,'The new owner must be in this temporary voice room.');
+    if(room.bannedUsers.has(member.id))return panelNotice(interaction,'That member is banned from the room.');
+    const previousOwner=room.ownerId;
+    const wasUserAccess=room.accessUsers.has(member.id);
+    try{
+      await voice.permissionOverwrites.edit(member.id,{ViewChannel:true,Connect:true,Speak:true});
+      await guild.channels.cache.get(room.panelChannelId)?.permissionOverwrites.edit(member.id,{ViewChannel:true,ReadMessageHistory:true,SendMessages:false});
+      room.ownerId=member.id;
+      room.accessUsers.add(member.id);
+      room.operatorControls=room.operatorControls!==false;
+    }catch(e){
+      if(!wasUserAccess)await voice.permissionOverwrites.edit(member.id,{ViewChannel:null,Connect:null,Speak:null}).catch(()=>{});
+      if(!wasUserAccess)await guild.channels.cache.get(room.panelChannelId)?.permissionOverwrites.edit(member.id,{ViewChannel:null,ReadMessageHistory:null,SendMessages:null}).catch(()=>{});
+      room.ownerId=previousOwner;
+      throw e;
+    }
   }
   else if(action==='panel-selected'){
-    if(!member)return interaction.reply({content:'Select a member first.',ephemeral:true});
+    if(!member)return panelNotice(interaction,'Select a member first.');
     await grant(room,guild,member.id,'user',client);
   }
   else if(action==='revoke-panel-selected'){
-    if(!member)return interaction.reply({content:'Select a member first.',ephemeral:true});
+    if(!member)return panelNotice(interaction,'Select a member first.');
     await revoke(room,guild,member.id,'user',client);
   }
-  else if(action==='grant-user'){const id=selected(interaction,'access-user');if(!id)return interaction.reply({content:'Select a user first.',ephemeral:true});await grant(room,guild,id,'user',client);}
-  else if(action==='revoke-user'){const id=selected(interaction,'access-user');if(!id)return interaction.reply({content:'Select a user first.',ephemeral:true});await revoke(room,guild,id,'user',client);}
-  else if(action==='grant-role'){const id=selected(interaction,'access-role');if(!id)return interaction.reply({content:'Select a role first.',ephemeral:true});await grant(room,guild,id,'role',client);}
-  else if(action==='revoke-role'){const id=selected(interaction,'access-role');if(!id)return interaction.reply({content:'Select a role first.',ephemeral:true});await revoke(room,guild,id,'role',client);}
+  else if(action==='grant-user'){const id=selected(interaction,'access-user');if(!id)return panelNotice(interaction,'Select a user first.');await grant(room,guild,id,'user',client);}
+  else if(action==='revoke-user'){const id=selected(interaction,'access-user');if(!id)return panelNotice(interaction,'Select a user first.');await revoke(room,guild,id,'user',client);}
+  else if(action==='grant-role'){const id=selected(interaction,'access-role');if(!id)return panelNotice(interaction,'Select a role first.');await grant(room,guild,id,'role',client);}
+  else if(action==='revoke-role'){const id=selected(interaction,'access-role');if(!id)return panelNotice(interaction,'Select a role first.');await revoke(room,guild,id,'role',client);}
   else if(action==='reset-access'){
-    room.accessUsers=new Set([room.ownerId]);room.accessRoles=new Set();room.bannedUsers=new Set();
-    for(const id of [...voice.permissionOverwrites.cache.keys()])if(id!==guild.roles.everyone.id&&id!==guild.members.me?.id&&id!==room.ownerId)await voice.permissionOverwrites.delete(id).catch(()=>{});
+    const managedIds=new Set([...room.accessUsers,...room.accessRoles,...room.bannedUsers]);
     const panel=guild.channels.cache.get(room.panelChannelId);
-    for(const id of [...(panel?.permissionOverwrites?.cache?.keys()||[])])if(id!==guild.roles.everyone.id&&id!==guild.members.me?.id&&id!==room.ownerId)await panel.permissionOverwrites.delete(id).catch(()=>{});
+    const changes=[];
+    try{
+      for(const id of managedIds){
+        if(id===room.ownerId)continue;
+        changes.push({
+          id,
+          panelBefore:panel?.permissionOverwrites.cache.get(id),
+          voiceBefore:voice.permissionOverwrites.cache.get(id)
+        });
+        await panel?.permissionOverwrites.edit(id,{ViewChannel:null,ReadMessageHistory:null,SendMessages:null});
+        await voice.permissionOverwrites.edit(id,{ViewChannel:null,Connect:null,Speak:null});
+      }
+      room.accessUsers=new Set([room.ownerId]);
+      room.accessRoles=new Set();
+      room.bannedUsers=new Set();
+      room.permissionsDirty=false;
+    }catch(e){
+      for(const change of changes.reverse()){
+        await panel?.permissionOverwrites.edit(change.id,permissionPatch(change.panelBefore,[['ViewChannel',PermissionFlagsBits.ViewChannel],['ReadMessageHistory',PermissionFlagsBits.ReadMessageHistory],['SendMessages',PermissionFlagsBits.SendMessages]])).catch(()=>{});
+        await voice.permissionOverwrites.edit(change.id,permissionPatch(change.voiceBefore,[['ViewChannel',PermissionFlagsBits.ViewChannel],['Connect',PermissionFlagsBits.Connect],['Speak',PermissionFlagsBits.Speak]])).catch(()=>{});
+      }
+      room.permissionsDirty=true;
+      throw e;
+    }
   }
   else if(action==='sync-perms')await syncPermissions(room,guild,client);
   else if(action==='toggle-sync')room.syncPermissions=room.syncPermissions===false;
   else if(action==='toggle-operators')room.operatorControls=room.operatorControls===false;
-  else if(action==='rebuild'){room.panelMessageId=null;await refresh(client,room,room.page);return;}
-  else if(action==='disconnect-bot'){client.voiceSessions?.get(guild.id)?.connection?.destroy?.();room.ttsConnection?.destroy?.();}
-  else if(action==='room-chat')return interaction.reply({content:'Open <#'+room.voiceChannelId+'> to use Discord voice-channel chat and AutoTTS.',ephemeral:true});
+  else if(action==='rebuild'){
+    const panel=guild.channels.cache.get(room.panelChannelId);
+    if(room.panelMessageId){
+      const oldMessageId=room.panelMessageId;
+      room.panelMessageId=null;
+      await panel?.messages.delete(oldMessageId).catch(e=>{
+        if(e?.code!==10008)console.error('[TempVC/Panel] Failed to delete old panel message:',e?.message||e);
+      });
+    }
+    return panelUpdate(interaction,client,room,room.page);
+  }
+  else if(action==='disconnect-bot'){
+    await tts.stop(room,client);
+    const session=client.voiceSessions?.get(guild.id);
+    if(session?.connection===room.ttsConnection){
+      session.queue=[];
+      session.current=null;
+      session.player?.stop(true);
+      session.connection?.destroy?.();
+      session.connection=null;
+    }else{
+      room.ttsConnection?.destroy?.();
+    }
+    room.ttsConnection=null;
+  }
+  else if(action==='room-chat')return panelNotice(interaction,'Open <#'+room.voiceChannelId+'> to use Discord voice-channel chat and AutoTTS.');
   else if(action==='tts-enable')room.tts.enabled=true;
   else if(action==='tts-disable')room.tts.enabled=false;
   else if(action==='autotts-enable')room.tts.autoTts=true;
   else if(action==='autotts-disable')room.tts.autoTts=false;
   else if(action==='prefix-enable')room.tts.prefixName=true;
   else if(action==='prefix-disable')room.tts.prefixName=false;
-  else if(action==='tts-stop')tts.stop(room,client);
+  else if(action==='tts-stop')await tts.stop(room,client);
   else if(action==='speak')return showForm(interaction,'speak');
   else if(action==='rate-down')room.tts.rate=Math.max(50,(Number(room.tts.rate)||100)-10);
-  else if(action==='rate-up')room.tts.rate=Math.min(150,(Number(room.tts.rate)||100)+10);
+  else if(action==='rate-up'){const configuredRate=Number(cfg(client).tts?.maxRate);const maxRate=Number.isFinite(configuredRate)?Math.max(50,Math.min(150,configuredRate)):150;room.tts.rate=Math.min(maxRate,(Number(room.tts.rate)||100)+10);}
   else if(action==='volume')return showForm(interaction,'volume');
-  else if(action==='delete'){
-    return interaction.showModal(new ModalBuilder().setCustomId('rn-tvc-modal:delete').setTitle('Delete Temporary Room').addComponents(
-      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('value').setLabel('Type DELETE to confirm').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(6))
-    ));
-  }
-  return interaction.update(await refresh(client,room,room.page));
+  return panelUpdate(interaction,client,room,room.page);
 }
 
 async function handleSelect(interaction,client,rooms){
   const room=roomFromPanel(interaction.channelId,rooms);
-  if(!room||!canAccess(interaction,room))return interaction.reply({content:'You do not have access to this panel.',ephemeral:true});
+  if(!room||!canAccess(interaction,room))return panelNotice(interaction,'You do not have access to this panel.');
   normalizeRoom(room,client);
+  if(!(await deferPanelInteraction(interaction)))return;
   const kind=interaction.customId.slice('rn-tvc:'.length);
   const value=interaction.values?.[0];
-  if(!value)return interaction.reply({content:'Nothing was selected.',ephemeral:true});
-  if(kind==='page')return interaction.update(await refresh(client,room,value));
-  if(!canControl(interaction,room,client,kind))return interaction.reply({content:'Only the room owner can use that selection.',ephemeral:true});
-  if(kind==='tts-provider'){room.tts.provider=value;return interaction.update(await refresh(client,room,'tts'));}
+  if(!value)return panelNotice(interaction,'Nothing was selected.');
+  if(kind==='page')return panelUpdate(interaction,client,room,value);
+  if(!canControl(interaction,room,client,kind))return panelNotice(interaction,'Only the room owner can use that selection.');
+  if(kind==='tts-provider'){
+    if(!['edge','google','polly'].includes(value))return panelNotice(interaction,'That TTS provider is not supported.');
+    room.tts.provider=value;
+    return panelUpdate(interaction,client,room,'tts');
+  }
   if(kind==='tts-voice'){
     const voices=await tts.listVoices().catch(()=>[]);
     const match=voices.find(v=>(v.ShortName||v.Name)===value);
-    if(!match)return interaction.reply({content:'That voice is no longer available. Refresh and try again.',ephemeral:true});
+    if(!match)return panelNotice(interaction,'That voice is no longer available. Refresh and try again.');
     room.tts.voice=value;room.tts.lang=match.Locale||room.tts.lang;
-    return interaction.update(await refresh(client,room,'tts'));
+    return panelUpdate(interaction,client,room,'tts');
   }
-  if(kind==='tts-language'){room.tts.lang=value;return interaction.update(await refresh(client,room,'tts'));}
+  if(kind==='tts-language'){
+    const languages=await tts.listLanguages().catch(e=>{console.error('[TempVC/TTS] Languages:',e?.message||e);return[];});
+    if(!languages.some(x=>String(x.code)===String(value)))return panelNotice(interaction,'That language is no longer available. Refresh and try again.');
+    room.tts.lang=value;
+    return panelUpdate(interaction,client,room,'tts');
+  }
   if(kind==='member'||kind==='access-user'||kind==='access-role'){
-    selections.set(selectionKey(interaction,kind),value);
-    return interaction.reply({content:kind==='member'?'Selected <@'+value+'>.':'Selected '+(kind==='access-role'?'<@&'+value+'>':'<@'+value+'>')+'.',ephemeral:true});
+    rememberSelection(interaction,kind,value);
+    return panelNotice(interaction,kind==='member'?'Selected <@'+value+'>.':'Selected '+(kind==='access-role'?'<@&'+value+'>':'<@'+value+'>')+'.');
   }
-  return interaction.reply({content:'Unknown panel selection.',ephemeral:true});
+  return panelNotice(interaction,'Unknown panel selection.');
 }
 
 async function handleModal(interaction,client,rooms){
   const room=roomFromPanel(interaction.channelId,rooms);
-  if(!room||!canAccess(interaction,room))return interaction.reply({content:'You do not have access to this panel.',ephemeral:true});
+  if(!room||!canAccess(interaction,room))return panelNotice(interaction,'You do not have access to this panel.');
   const kind=interaction.customId.slice('rn-tvc-modal:'.length);
-  if(kind!=='delete'&&!canControl(interaction,room,client,kind))return interaction.reply({content:'Only the room owner can use that control.',ephemeral:true});
+  if(kind!=='delete'&&!canControl(interaction,room,client,kind))return panelNotice(interaction,'Only the room owner can use that control.');
   const value=interaction.fields.getTextInputValue('value').trim();
   const guild=interaction.guild;
   const voice=guild.channels.cache.get(room.voiceChannelId);
+  if(!(await interaction.deferReply({flags:MessageFlags.Ephemeral}).then(()=>true).catch(e=>{console.error('[TempVC/Panel] deferReply:',e?.message||e);return false;})))return;
   if(kind==='delete'){
-    if(value.toUpperCase()!=='DELETE')return interaction.reply({content:'Deletion cancelled. Type DELETE exactly to confirm.',ephemeral:true});
-    await interaction.reply({content:'Deleting the temporary room...',ephemeral:true});
+    if(value.toUpperCase()!=='DELETE')return interaction.editReply({content:'Deletion cancelled. Type DELETE exactly to confirm.'});
+    await interaction.editReply({content:'Deleting the temporary room...'});
     return deleteRoom(client,rooms,room,guild,'Temporary VC owner deleted the room');
   }
-  if(!voice)return interaction.reply({content:'The voice room no longer exists.',ephemeral:true});
+  if(!voice)return interaction.editReply({content:'The voice room no longer exists.'});
   try{
     if(kind==='rename'){
       const name=value.replace(/\s+/g,' ').slice(0,100);if(!name)throw new Error('Room name cannot be empty.');
@@ -711,28 +1147,40 @@ async function handleModal(interaction,client,rooms){
     }else if(kind==='slowmode'){
       const n=Number(value);if(!Number.isInteger(n)||n<0||n>21600)throw new Error('Slowmode must be 0-21600 seconds.');await voice.setRateLimitPerUser(n);
     }else if(kind==='rate'){
-      const n=Number(value);if(!Number.isInteger(n)||n<50||n>150)throw new Error('TTS rate must be 50-150.');room.tts.rate=n;
+      const configuredRate=Number(cfg(client).tts?.maxRate);const maxRate=Number.isFinite(configuredRate)?Math.max(50,Math.min(150,configuredRate)):150;const n=Number(value);if(!Number.isInteger(n)||n<50||n>maxRate)throw new Error('TTS rate must be 50-'+maxRate+'.');room.tts.rate=n;
     }else if(kind==='volume'){
-      const n=Number(value);if(!Number.isInteger(n)||n<0||n>150)throw new Error('TTS volume must be 0-150.');room.tts.volume=n;
+      const configuredVolume=Number(cfg(client).tts?.maxVolume);const maxVolume=Number.isFinite(configuredVolume)?Math.max(0,Math.min(150,configuredVolume)):150;const n=Number(value);if(!Number.isInteger(n)||n<0||n>maxVolume)throw new Error('TTS volume must be 0-'+maxVolume+'.');room.tts.volume=n;
     }else if(kind==='speak'){
       await tts.speak(client,room,value,interaction.member);
     }else if(kind==='tts-voice-manual'){
-      room.tts.voice=value;
+      const name=value.replace(/\s+/g,' ').trim();
+      if(!name)throw new Error('TTS voice cannot be empty.');
+      if(room.tts.provider==='edge'){
+        const voices=await tts.listVoices();
+        const match=voices.find(v=>(v.ShortName||v.Name)===name);
+        if(!match)throw new Error('That Edge TTS voice was not found. Use the voice browser.');
+        room.tts.voice=match.ShortName||match.Name;
+        room.tts.lang=match.Locale||room.tts.lang;
+      }else{
+        room.tts.voice=name;
+      }
     }else throw new Error('Unknown panel form.');
     room.page=kind==='speak'?'tts':'room';
-    await interaction.reply({content:'Updated.',ephemeral:true});
+    if(!(await persistRoom(client,room)))throw new Error('The change could not be durably saved. Please try again.');
     await refresh(client,room,room.page);
-  }catch(e){return interaction.reply({content:'Could not update: '+(e?.message||e),ephemeral:true});}
+    return interaction.editReply({content:'Updated.'});
+  }catch(e){return interaction.editReply({content:'Could not update: '+(e?.message||e)}).catch(()=>{});}
 }
 
 async function handle(interaction,client,rooms){
   try{
-    if(interaction.isButton?.()&&interaction.customId.startsWith('rn-tvc:'))return handleButton(interaction,client,rooms);
-    if((interaction.isStringSelectMenu?.()||interaction.isUserSelectMenu?.()||interaction.isRoleSelectMenu?.())&&interaction.customId.startsWith('rn-tvc:'))return handleSelect(interaction,client,rooms);
-    if(interaction.isModalSubmit?.()&&interaction.customId.startsWith('rn-tvc-modal:'))return handleModal(interaction,client,rooms);
+    if(interaction.isButton?.()&&interaction.customId.startsWith('rn-tvc:'))return await handleButton(interaction,client,rooms);
+    if((interaction.isStringSelectMenu?.()||interaction.isUserSelectMenu?.()||interaction.isRoleSelectMenu?.())&&interaction.customId.startsWith('rn-tvc:'))return await handleSelect(interaction,client,rooms);
+    if(interaction.isModalSubmit?.()&&interaction.customId.startsWith('rn-tvc-modal:'))return await handleModal(interaction,client,rooms);
   }catch(e){
     console.error('[TempVC/Panel]',e?.stack||e);
-    if(!interaction.replied&&!interaction.deferred)await interaction.reply({content:'Panel action failed: '+(e?.message||e),ephemeral:true}).catch(()=>{});
+    if(interaction.deferred&&!interaction.replied)await interaction.editReply({content:'Panel action failed: '+(e?.message||e)}).catch(()=>{});
+    else if(!interaction.replied&&!interaction.deferred)await interaction.reply({content:'Panel action failed: '+(e?.message||e),flags:MessageFlags.Ephemeral}).catch(()=>{});
   }
 }
 
@@ -741,47 +1189,153 @@ async function recover(client,rooms){
   for(const guild of client.guilds.cache.values()){
     const channels=await guild.channels.fetch().catch(()=>guild.channels.cache);
     for(const channel of channels.values()){
-      if(!channel?.isTextBased?.()||!channel.topic?.startsWith('RealmsNetwork temporary VC panel | '))continue;
-      const owner=channel.topic.match(/owner=(\d+)/)?.[1];
-      const voiceId=channel.topic.match(/voice=(\d+)/)?.[1];
+      if(!channel?.isTextBased?.())continue;
+      const isCurrentPanel=channel.topic?.startsWith(PANEL_TOPIC_PREFIX);
+      const isLegacyPanel=channel.topic?.startsWith(LEGACY_PANEL_TOPIC_PREFIX);
+      if(!isCurrentPanel&&!isLegacyPanel)continue;
+      const owner=channel.topic.match(/owner=(\d{17,20})/)?.[1];
+      const voiceId=channel.topic.match(/voice=(\d{17,20})/)?.[1];
       if(!owner||!voiceId)continue;
       const voice=guild.channels.cache.get(voiceId)||await guild.channels.fetch(voiceId).catch(()=>null);
-      if(!voice||voice.type!==ChannelType.GuildVoice){await channel.delete('Temporary VC voice channel missing').catch(()=>{});continue;}
-      const room={
-        guildId:guild.id,voiceChannelId:voice.id,panelChannelId:channel.id,panelMessageId:null,
-        ownerId:owner,createdAt:channel.createdTimestamp||Date.now(),
-        locked:!!voice.permissionOverwrites.cache.get(guild.roles.everyone.id)?.deny.has(PermissionFlagsBits.Connect),
-        hidden:!!voice.permissionOverwrites.cache.get(guild.roles.everyone.id)?.deny.has(PermissionFlagsBits.ViewChannel),
-        accessUsers:new Set([owner]),accessRoles:new Set(),bannedUsers:new Set(),page:'overview',operatorControls:tc(client).panelAccessCanControl !== false,syncPermissions:tc(client).syncPermissions !== false,ttsBrowser:{kind:null,page:0}
-      };
-      for(const [id,ow] of channel.permissionOverwrites.cache){
-        if(id===guild.roles.everyone.id||id===guild.members.me?.id)continue;
-        if(ow.type===0&&ow.allow.has(PermissionFlagsBits.ViewChannel))room.accessRoles.add(id);
-        if(ow.type===1&&ow.allow.has(PermissionFlagsBits.ViewChannel))room.accessUsers.add(id);
+      if(!voice||voice.type!==ChannelType.GuildVoice){
+        await channel.delete('Temporary VC voice channel missing').catch(()=>{});
+        await client.db?.delete?.(guild.id,'tempvc:'+voiceId).catch(()=>{});
+        continue;
       }
-      for(const [id,ow] of voice.permissionOverwrites.cache){
-        if(id===guild.roles.everyone.id||id===guild.members.me?.id||id===owner)continue;
-        if(ow.type===1&&ow.deny.has(PermissionFlagsBits.Connect))room.bannedUsers.add(id);
+
+      let saved=null;
+      try{
+        saved=await client.db?.get?.(guild.id,'tempvc:'+voice.id,null);
+      }catch(e){
+        console.error('[TempVC] Failed to read persisted room state:',e?.message||e);
+      }
+      const hasSavedState=saved?.version===1&&validSnowflake(saved.ownerId);
+      if(isCurrentPanel&&!hasSavedState){
+        console.warn('[TempVC] Ignoring a v2 panel without matching durable state; it will not be auto-adopted.');
+        continue;
+      }
+      const room={
+        guildId:guild.id,
+        voiceChannelId:voice.id,
+        panelChannelId:channel.id,
+        panelMessageId:hasSavedState&&/^\d{17,20}$/.test(String(saved.panelMessageId||''))?String(saved.panelMessageId):null,
+        ownerId:hasSavedState?String(saved.ownerId):owner,
+        createdAt:channel.createdTimestamp||Date.now(),
+        locked:hasSavedState?!!saved.locked:!!voice.permissionOverwrites.cache.get(guild.roles.everyone.id)?.deny.has(PermissionFlagsBits.Connect),
+        hidden:hasSavedState?!!saved.hidden:!!voice.permissionOverwrites.cache.get(guild.roles.everyone.id)?.deny.has(PermissionFlagsBits.ViewChannel),
+        accessUsers:cleanIdSet(hasSavedState&&Array.isArray(saved.accessUsers)?saved.accessUsers:[owner]),
+        accessRoles:cleanIdSet(hasSavedState&&Array.isArray(saved.accessRoles)?saved.accessRoles:[]),
+        bannedUsers:cleanIdSet(hasSavedState&&Array.isArray(saved.bannedUsers)?saved.bannedUsers:[]),
+        page:'overview',
+        operatorControls:hasSavedState?saved.operatorControls!==false:tc(client).ownerOnlyControl !== true && tc(client).panelAccessCanControl !== false,
+        syncPermissions:hasSavedState?saved.syncPermissions!==false:tc(client).syncPermissions !== false,
+        emptySince:hasSavedState&&Number.isFinite(Number(saved.emptySince))?Number(saved.emptySince):(voice.members.size===0?Date.now():null),
+        recoveryGraceUntil:voice.members.size===0?Date.now()+recoveryGraceMs(client):0,
+        tts:hasSavedState&&saved.tts&&typeof saved.tts==='object'?saved.tts:{},
+        ttsBrowser:{kind:null,page:0}
+      };
+
+      if(!hasSavedState && isLegacyPanel){
+        for(const [id,ow] of channel.permissionOverwrites.cache){
+          if(id===guild.roles.everyone.id||id===guild.members.me?.id)continue;
+          if(ow.type===0&&ow.allow.has(PermissionFlagsBits.ViewChannel))room.accessRoles.add(id);
+          if(ow.type===1&&ow.allow.has(PermissionFlagsBits.ViewChannel))room.accessUsers.add(id);
+        }
+        for(const [id,ow] of voice.permissionOverwrites.cache){
+          if(id===guild.roles.everyone.id||id===guild.members.me?.id||id===owner)continue;
+          if(ow.type===1&&ow.deny.has(PermissionFlagsBits.Connect))room.bannedUsers.add(id);
+        }
+      }
+
+      if(isLegacyPanel){
+        await channel.setTopic(PANEL_TOPIC_PREFIX+'owner='+room.ownerId+' | voice='+voice.id,'Migrate temporary VC panel metadata to v2').catch(()=>{});
+      }
+
+      if(tc(client).autoTransferOnOwnerLeave!==false&&!voice.members.has(room.ownerId)&&voice.members.size>0){
+        const next=[...voice.members.values()]
+          .filter(member=>!member.user.bot&&!room.bannedUsers.has(member.id))
+          .sort((a,b)=>(a.joinedTimestamp||0)-(b.joinedTimestamp||0))[0];
+        if(next){
+          room.ownerId=next.id;
+          room.accessUsers.add(next.id);
+          await voice.permissionOverwrites.edit(next.id,{Connect:true,Speak:true,ViewChannel:true}).catch(()=>{});
+          await channel.permissionOverwrites.edit(next.id,{ViewChannel:true,ReadMessageHistory:true,SendMessages:false}).catch(()=>{});
+        }
+      }
+
+      if(!room.panelMessageId){
+        const existing=await channel.messages.fetch({limit:25}).then(messages=>[
+          ...messages.values()
+        ].find(message=>message.author?.id===client.user?.id&&message.components?.some(row=>row.components?.some(component=>component.customId==='rn-tvc:page')))).catch(e=>{
+          console.error('[TempVC] Failed to inspect existing panel messages:',e?.message||e);
+          return null;
+        });
+        if(existing)room.panelMessageId=existing.id;
       }
       rooms.set(voice.id,room);
-      await refresh(client,room,'overview').catch(()=>{});
+      await refresh(client,room,'overview').catch(e=>console.error('[TempVC] Recovery refresh failed:',e?.message||e));
     }
   }
 }
 
 async function cleanup(client,rooms){
-  if(tc(client).autoDeleteEmpty===false)return;
-  for(const room of [...rooms.values()]){
-    const guild=client.guilds.cache.get(room.guildId);
-    if(!guild){rooms.delete(room.voiceChannelId);continue;}
-    const voice=guild.channels.cache.get(room.voiceChannelId);
-    if(!voice){
-      rooms.delete(room.voiceChannelId);
-      const panel=room.panelChannelId&&guild.channels.cache.get(room.panelChannelId);
-      await panel?.delete('Temporary VC voice channel missing').catch(()=>{});
-      continue;
+  if(cleanupRunning||tc(client).autoDeleteEmpty===false)return;
+  cleanupRunning=true;
+  try{
+    for(const room of [...rooms.values()]){
+      const guild=client.guilds.cache.get(room.guildId);
+      if(!guild){rooms.delete(room.voiceChannelId);await deletePersistedRoom(client,room);continue;}
+      const voice=guild.channels.cache.get(room.voiceChannelId);
+      if(!voice){
+        rooms.delete(room.voiceChannelId);
+        await deletePersistedRoom(client,room);
+        const panel=room.panelChannelId&&guild.channels.cache.get(room.panelChannelId);
+        await panel?.delete('Temporary VC voice channel missing').catch(()=>{});
+        continue;
+      }
+      if(voice.members.size===0){
+        const now=Date.now();
+        if(!room.emptySince){
+          room.emptySince=now;
+          await persistRoom(client,room);
+        }
+        if(Number(room.recoveryGraceUntil)>now)continue;
+        if(now-Number(room.emptySince)>=emptyGraceMs(client)){
+          await deleteRoom(client,rooms,room,guild,'Temporary voice room empty');
+        }
+      }else if(room.emptySince){
+        room.emptySince=null;
+        room.recoveryGraceUntil=0;
+        await persistRoom(client,room);
+      }
     }
-    if(voice.members.size===0)await deleteRoom(client,rooms,room,guild,'Temporary voice room empty');
+  }finally{
+    cleanupRunning=false;
+  }
+}
+
+async function channelUpdate(oldChannel,newChannel,client,rooms){
+  if(!newChannel?.id||newChannel.type!==ChannelType.GuildVoice)return;
+  const room=rooms.get(newChannel.id);
+  if(!room)return;
+  try{
+    normalizeRoom(room,client);
+    const guild=newChannel.guild;
+    const everyoneOverwrite=newChannel.permissionOverwrites.cache.get(guild.roles.everyone.id);
+    room.locked=!!everyoneOverwrite?.deny.has(PermissionFlagsBits.Connect);
+    room.hidden=!!everyoneOverwrite?.deny.has(PermissionFlagsBits.ViewChannel);
+    if(room.panelChannelId){
+      const panel=guild.channels.cache.get(room.panelChannelId);
+      if(panel){
+        const desired=panelSlug(client,newChannel.name);
+        if(panel.name!==desired)await panel.setName(desired,'Temporary VC room renamed').catch(()=>{});
+        const topic=PANEL_TOPIC_PREFIX+'owner='+room.ownerId+' | voice='+newChannel.id;
+        if(panel.topic!==topic)await panel.setTopic(topic,'Synchronize temporary VC recovery metadata').catch(()=>{});
+      }
+    }
+    await refresh(client,room,room.page||'overview');
+  }catch(e){
+    console.error('[TempVC] channelUpdate:',e?.stack||e);
   }
 }
 
@@ -798,4 +1352,4 @@ function destroy(){
   selections.clear();
 }
 
-module.exports={create,refresh,deleteRoom,initialize,destroy,recover,cleanup,handle,panelSlug,syncPermissions,normalizeRoom};
+module.exports={create,refresh,deleteRoom,initialize,destroy,recover,cleanup,handle,panelSlug,syncPermissions,normalizeRoom,channelUpdate,persistRoom};
