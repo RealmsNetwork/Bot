@@ -507,15 +507,7 @@ async function speak(client, room, text, member, overrides = {}) {
   phrase = phrase.slice(0, max);
   if (settings.prefixName && member?.displayName) phrase = (member.displayName + ' says ' + phrase).slice(0, max);
   const queueLimit = finiteConfigNumber(client.modules.get('voice')?.config?.tts?.maxQueueSize, 20, 1, 100);
-  room.ttsEnqueueCount = Number(room.ttsEnqueueCount || 0);
-  if ((room.ttsQueue?.length || 0) + room.ttsEnqueueCount >= queueLimit) {
-    throw new Error('TTS queue is full. Please wait for the current speech to finish.');
-  }
-  room.ttsEnqueueCount += 1;
-  if (!room.guildId || !room.voiceChannelId) {
-    room.ttsEnqueueCount -= 1;
-    throw new Error('Invalid temporary voice room state.');
-  }
+  if (!room.guildId || !room.voiceChannelId) throw new Error('Invalid temporary voice room state.');
 
   const cooldownMs = finiteConfigNumber(client.modules.get('voice')?.config?.tts?.cooldownSeconds, 0, 0, 60) * 1000;
   let cooldownUserId = null;
@@ -536,6 +528,13 @@ async function speak(client, room, text, member, overrides = {}) {
       }
     }
   }
+
+  room.ttsEnqueueCount = Number(room.ttsEnqueueCount || 0);
+  if ((room.ttsQueue?.length || 0) + room.ttsEnqueueCount >= queueLimit) {
+    if (cooldownUserId && room.ttsCooldowns?.get(cooldownUserId) === cooldownSetAt) room.ttsCooldowns.delete(cooldownUserId);
+    throw new Error('TTS queue is full. Please wait for the current speech to finish.');
+  }
+  room.ttsEnqueueCount += 1;
 
   const generation = room.ttsGeneration || 0;
   try {
