@@ -705,7 +705,7 @@ async function handleSelect(interaction,client,rooms){
   if(kind==='tts-voice'){
     const voices=await tts.listVoices().catch(()=>[]);
     const match=voices.find(v=>(v.ShortName||v.Name)===value);
-    if(!match)return interaction.reply({content:'That voice is no longer available. Refresh and try again.',flags:MessageFlags.Ephemeral});
+    if(!match)return panelNotice(interaction,'That voice is no longer available. Refresh and try again.');
     room.tts.voice=value;room.tts.lang=match.Locale||room.tts.lang;
     return panelUpdate(interaction,client,room,'tts');
   }
