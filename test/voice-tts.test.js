@@ -21,10 +21,17 @@ Module._load = function (request, parent, isMain) {
   return originalLoad.call(this, request, parent, isMain);
 };
 
-const { panelSlug } = require('../modules/voice/temp-panel');
-const { languageList, rateValue, volumeValue, settingsFor, speak } = require('../modules/voice/tts-service');
+let voicePanel;
+let ttsService;
+try {
+  voicePanel = require('../modules/voice/temp-panel');
+  ttsService = require('../modules/voice/tts-service');
+} finally {
+  Module._load = originalLoad;
+}
 
-Module._load = originalLoad;
+const { panelSlug } = voicePanel;
+const { languageList, rateValue, volumeValue, settingsFor, speak } = ttsService;
 
 function clientWithTts(tts = {}, temporaryVoice = {}) {
   return {
