@@ -646,7 +646,9 @@ function targetIsInRoom(member, room) {
 }
 
 async function panelUpdate(interaction,client,room,page){
-  if(!interaction.deferred&&!interaction.replied)await interaction.deferUpdate().catch(e=>console.error('[TempVC/Panel] deferUpdate:',e?.message||e));
+  if(!interaction.deferred&&!interaction.replied){
+    if(!(await deferPanelInteraction(interaction)))return null;
+  }
   const msg=await refresh(client,room,page);
   if(!msg)return interaction.editReply({content:'The temporary VC panel is no longer available.',embeds:[],components:[]}).catch(e=>console.error('[TempVC/Panel] editReply:',e?.message||e));
   const payload={
@@ -700,11 +702,11 @@ async function handleButton(interaction,client,rooms){
   const memberActions=new Set(['kick','ban','unban','mute','unmute','deafen','undeafen','transfer-selected','panel-selected','revoke-panel-selected']);
   const member=memberActions.has(action)?await getMember(interaction):null;
 
-  if(action==='lock'){room.locked=true;await voice.permissionOverwrites.edit(guild.roles.everyone,{Connect:false});}
-  else if(action==='unlock'){room.locked=false;await voice.permissionOverwrites.edit(guild.roles.everyone,{Connect:true});}
-  else if(action==='hide'){room.hidden=true;await voice.permissionOverwrites.edit(guild.roles.everyone,{ViewChannel:false});}
-  else if(action==='unhide'){room.hidden=false;await voice.permissionOverwrites.edit(guild.roles.everyone,{ViewChannel:true});}
-  else if(action==='reset-room'){room.locked=false;room.hidden=false;await voice.permissionOverwrites.edit(guild.roles.everyone,{Connect:true,ViewChannel:true});await voice.setUserLimit(0);await voice.setBitrate(Math.min(64000,Number(c.maxBitrate)||384000)).catch(()=>{});}
+  if(action==='lock'){await voice.permissionOverwrites.edit(guild.roles.everyone,{Connect:false});room.locked=true;}
+  else if(action==='unlock'){await voice.permissionOverwrites.edit(guild.roles.everyone,{Connect:true});room.locked=false;}
+  else if(action==='hide'){await voice.permissionOverwrites.edit(guild.roles.everyone,{ViewChannel:false});room.hidden=true;}
+  else if(action==='unhide'){await voice.permissionOverwrites.edit(guild.roles.everyone,{ViewChannel:true});room.hidden=false;}
+  else if(action==='reset-room'){await voice.permissionOverwrites.edit(guild.roles.everyone,{Connect:true,ViewChannel:true});await voice.setUserLimit(0);await voice.setBitrate(Math.min(64000,Number(c.maxBitrate)||384000));room.locked=false;room.hidden=false;}
   else if(action==='quality'){
     const cur=String(voice.videoQualityMode||'auto').toLowerCase();
     const next=cur==='auto'?'full':'auto';
@@ -780,7 +782,7 @@ async function handleButton(interaction,client,rooms){
   else if(action==='autotts-disable')room.tts.autoTts=false;
   else if(action==='prefix-enable')room.tts.prefixName=true;
   else if(action==='prefix-disable')room.tts.prefixName=false;
-  else if(action==='tts-stop')tts.stop(room,client);
+  else if(action==='tts-stop')await tts.stop(room,client);
   else if(action==='speak')return showForm(interaction,'speak');
   else if(action==='rate-down')room.tts.rate=Math.max(50,(Number(room.tts.rate)||100)-10);
   else if(action==='rate-up')room.tts.rate=Math.min(150,(Number(room.tts.rate)||100)+10);
