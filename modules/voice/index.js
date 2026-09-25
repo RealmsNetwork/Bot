@@ -5,6 +5,7 @@ const {EdgeTTS}=require('node-edge-tts');
 const path=require('node:path');
 const fs=require('node:fs');
 const tempPanel=require('./temp-panel');
+const ttsCommands=require('./tts-commands');
 const sessions=new Map();
 const tempRooms=new Map();
 const creatingTempRooms=new Set();
@@ -30,6 +31,7 @@ const commands=[
 ];
 const listeners=[
 {event:'interactionCreate',handle:async(interaction,client)=>{if(interaction.customId?.startsWith('rn-tvc:'))return tempPanel.handle(interaction,client,tempRooms);}},
+{event:'messageCreate',handle:async(message,client)=>{if(message.author?.bot||!message.guild)return;const room=tempRooms.get(message.channelId);if(!room)return;const t=room.tts||{};if(t.enabled!==true||t.autoTts!==true)return;try{await require('./tts-service').speak(client,room,message.cleanContent,message.member);}catch(e){console.error('[TempVC/TTS Auto]',e?.message||e);}}},
 {event:'channelUpdate',handle:async(oldChannel,newChannel,client)=>{if(newChannel?.type===ChannelType.GuildVoice)await tempPanel.channelUpdate(oldChannel,newChannel,client,tempRooms);}},
 {event:'voiceStateUpdate',handle:async(oldState,newState,client)=>{
   const c=cfg(client).temporaryVoice||{};
@@ -70,4 +72,4 @@ const extra=[
 {data:new SlashCommandBuilder().setName('vcname').setDescription('Rename your temporary voice room').addStringOption(o=>o.setName('name').setDescription('New name').setRequired(true)),execute:async(i,client)=>{const room=ownerOf(i.member.voice.channelId);if(!room||room.ownerId!==i.user.id)return i.reply({content:'You do not own this room.',ephemeral:true});const name=i.options.getString('name',true).slice(0,100);await i.member.voice.channel.setName(name);await tempPanel.channelUpdate({name:''},i.member.voice.channel,client,tempRooms).catch(()=>{});return i.reply({content:'Room renamed.',ephemeral:true});}},
 {data:new SlashCommandBuilder().setName('vclimit').setDescription('Set your temporary voice room limit').addIntegerOption(o=>o.setName('limit').setDescription('0-99').setRequired(true).setMinValue(0).setMaxValue(99)),execute:async(i,client)=>{const room=ownerOf(i.member.voice.channelId);if(!room||room.ownerId!==i.user.id)return i.reply({content:'You do not own this room.',ephemeral:true});await i.member.voice.channel.setUserLimit(i.options.getInteger('limit',true));await tempPanel.refresh(client,room,room.page||'room').catch(()=>{});return i.reply({content:'Room limit updated.',ephemeral:true});}}
 ];
-module.exports={commands:[...commands,...extra],listeners,initialize:async(client)=>{client.voiceRooms=tempRooms;client.voiceSessions=sessions;tempPanel.initialize(client,tempRooms);},destroy:async()=>{tempPanel.destroy();for(const s of sessions.values())s.connection?.destroy();sessions.clear();}};
+module.exports={commands:[...commands,...extra,...ttsCommands.commands],listeners,initialize:async(client)=>{client.voiceRooms=tempRooms;client.voiceSessions=sessions;client.voiceTtsRooms=client.voiceTtsRooms||new Map();tempPanel.initialize(client,tempRooms);},destroy:async()=>{tempPanel.destroy();for(const s of sessions.values())s.connection?.destroy();sessions.clear();}};
