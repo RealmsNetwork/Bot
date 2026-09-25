@@ -64,6 +64,7 @@ temporaryVoice:
   panelAllowTtsControl: true
   panelAllowUserAccess: true
   panelAllowRoleAccess: true
+  allowOwnerTts: true
   panelEnabled: true
   panelSuffix: "-panel"
   panelAutoPin: true
