@@ -1,0 +1,6 @@
+temporaryVoice:
+  panelEnabled: true
+  panelSuffix: "-panel"
+  panelAutoPin: true
+  panelAllowUserAccess: true
+  panelAllowRoleAccess: true
