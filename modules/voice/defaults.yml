@@ -24,3 +24,4 @@ temporaryVoice:
   allowOwnerBan: true
   panelAllowTtsControl: true
   autoTransferOnOwnerLeave: true
+  ownerLeaveGraceSeconds: 300
