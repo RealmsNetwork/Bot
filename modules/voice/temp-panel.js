@@ -116,6 +116,14 @@ function brand(client) {
   };
 }
 
+function validSnowflake(value) {
+  return /^\d{17,20}$/.test(String(value || ''));
+}
+
+function cleanIdSet(values) {
+  return new Set([...(values || [])].map(String).filter(validSnowflake));
+}
+
 function panelSlug(client, name) {
   const suffix = String(tc(client).panelSuffix || '-panel').slice(0, 99);
   const raw = String(name || 'room')
@@ -131,10 +139,10 @@ function panelSlug(client, name) {
 }
 
 function normalizeRoom(room, client) {
-  room.accessUsers = room.accessUsers instanceof Set ? room.accessUsers : new Set(room.accessUsers || []);
-  room.accessRoles = room.accessRoles instanceof Set ? room.accessRoles : new Set(room.accessRoles || []);
-  room.bannedUsers = room.bannedUsers instanceof Set ? room.bannedUsers : new Set(room.bannedUsers || []);
-  room.accessUsers.add(room.ownerId);
+  room.accessUsers = cleanIdSet(room.accessUsers instanceof Set ? room.accessUsers : room.accessUsers || []);
+  room.accessRoles = cleanIdSet(room.accessRoles instanceof Set ? room.accessRoles : room.accessRoles || []);
+  room.bannedUsers = cleanIdSet(room.bannedUsers instanceof Set ? room.bannedUsers : room.bannedUsers || []);
+  if(validSnowflake(room.ownerId))room.accessUsers.add(String(room.ownerId));
   room.page = room.page || 'overview';
   room.tts = tts.settingsFor(room, client);
   if (room.operatorControls === undefined) room.operatorControls = tc(client).ownerOnlyControl !== true && tc(client).panelAccessCanControl !== false;
@@ -1173,8 +1181,8 @@ async function recover(client,rooms){
       const isCurrentPanel=channel.topic?.startsWith(PANEL_TOPIC_PREFIX);
       const isLegacyPanel=channel.topic?.startsWith(LEGACY_PANEL_TOPIC_PREFIX);
       if(!isCurrentPanel&&!isLegacyPanel)continue;
-      const owner=channel.topic.match(/owner=(\d+)/)?.[1];
-      const voiceId=channel.topic.match(/voice=(\d+)/)?.[1];
+      const owner=channel.topic.match(/owner=(\d{17,20})/)?.[1];
+      const voiceId=channel.topic.match(/voice=(\d{17,20})/)?.[1];
       if(!owner||!voiceId)continue;
       const voice=guild.channels.cache.get(voiceId)||await guild.channels.fetch(voiceId).catch(()=>null);
       if(!voice||voice.type!==ChannelType.GuildVoice){
@@ -1189,7 +1197,11 @@ async function recover(client,rooms){
       }catch(e){
         console.error('[TempVC] Failed to read persisted room state:',e?.message||e);
       }
-      const hasSavedState=saved?.version===1&&/^\d{17,20}$/.test(String(saved.ownerId||''));
+      const hasSavedState=saved?.version===1&&validSnowflake(saved.ownerId);
+      if(isCurrentPanel&&!hasSavedState){
+        console.warn('[TempVC] Ignoring a v2 panel without matching durable state; it will not be auto-adopted.');
+        continue;
+      }
       const room={
         guildId:guild.id,
         voiceChannelId:voice.id,
@@ -1199,9 +1211,9 @@ async function recover(client,rooms){
         createdAt:channel.createdTimestamp||Date.now(),
         locked:hasSavedState?!!saved.locked:!!voice.permissionOverwrites.cache.get(guild.roles.everyone.id)?.deny.has(PermissionFlagsBits.Connect),
         hidden:hasSavedState?!!saved.hidden:!!voice.permissionOverwrites.cache.get(guild.roles.everyone.id)?.deny.has(PermissionFlagsBits.ViewChannel),
-        accessUsers:new Set(hasSavedState&&Array.isArray(saved.accessUsers)?saved.accessUsers:[owner]),
-        accessRoles:new Set(hasSavedState&&Array.isArray(saved.accessRoles)?saved.accessRoles:[]),
-        bannedUsers:new Set(hasSavedState&&Array.isArray(saved.bannedUsers)?saved.bannedUsers:[]),
+        accessUsers:cleanIdSet(hasSavedState&&Array.isArray(saved.accessUsers)?saved.accessUsers:[owner]),
+        accessRoles:cleanIdSet(hasSavedState&&Array.isArray(saved.accessRoles)?saved.accessRoles:[]),
+        bannedUsers:cleanIdSet(hasSavedState&&Array.isArray(saved.bannedUsers)?saved.bannedUsers:[]),
         page:'overview',
         operatorControls:hasSavedState?saved.operatorControls!==false:tc(client).ownerOnlyControl !== true && tc(client).panelAccessCanControl !== false,
         syncPermissions:hasSavedState?saved.syncPermissions!==false:tc(client).syncPermissions !== false,
