@@ -271,8 +271,16 @@ function actionEnabled(client, action) {
   return !entry?.[1];
 }
 
+const TTS_CONTROL_ACTIONS = new Set([
+  'tts-enable','tts-disable','autotts-enable','autotts-disable',
+  'prefix-enable','prefix-disable','tts-stop','speak','volume',
+  'rate-down','rate-up','tts-voices','tts-languages','tts-voice-manual',
+  'tts-provider','tts-language','tts-voice'
+]);
+
 function canControl(interaction, room, client, action) {
   if (!actionEnabled(client, action)) return false;
+  if (TTS_CONTROL_ACTIONS.has(action)) return canControlTts(interaction, room, client);
   if (interaction.user.id === room.ownerId) return true;
   if (ownerOnlyAction(action)) return false;
   return room.operatorControls !== false;
