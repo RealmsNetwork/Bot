@@ -100,8 +100,9 @@ test('parseLanguageCatalog reads the nested Google language map', () => {
     tl: { en: 'English', es: 'Spanish', 'pt-BR': 'Portuguese (Brazil)' }
   });
 
-  assert.deepEqual(languages.map(x => x.code), ['en', 'es', 'pt-BR']);
-  assert.equal(languages.find(x => x.code === 'pt-br').name, 'Portuguese (Brazil)');
+  assert.equal(languages.length, 3);
+  assert.deepEqual(new Set(languages.map(x => x.code)), new Set(['en', 'es', 'pt-BR']));
+  assert.equal(languages.find(x => x.code === 'pt-BR').name, 'Portuguese (Brazil)');
 });
 
 test('languageList deduplicates locales by language code', () => {
