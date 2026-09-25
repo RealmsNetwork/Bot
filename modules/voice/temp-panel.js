@@ -31,6 +31,7 @@ function roomSnapshot(room) {
   return {
     version: 1,
     ownerId: room.ownerId,
+    panelMessageId: /^\d{17,20}$/.test(String(room.panelMessageId || '')) ? String(room.panelMessageId) : null,
     accessUsers: [...(room.accessUsers || [])],
     accessRoles: [...(room.accessRoles || [])],
     bannedUsers: [...(room.bannedUsers || [])],
@@ -640,10 +641,17 @@ async function refresh(client, room, page = room.page || 'overview') {
   try{
     const msg=await panel.send(p);
     room.panelMessageId=msg.id;
+    try{
+      if(!(await persistRoom(client,room)))throw new Error('Panel message identity could not be durably saved.');
+    }catch(e){
+      room.panelMessageId=null;
+      await msg.delete().catch(()=>{});
+      throw e;
+    }
     return msg;
   }catch(e){
     console.error('[TempVC/Panel] Failed to send panel:',e?.message||e);
-    return null;
+    throw e;
   }
 }
 
@@ -988,12 +996,30 @@ async function handleButton(interaction,client,rooms){
   else if(action==='reset-access'){
     const managedIds=new Set([...room.accessUsers,...room.accessRoles,...room.bannedUsers]);
     const panel=guild.channels.cache.get(room.panelChannelId);
-    for(const id of managedIds){
-      if(id===room.ownerId)continue;
-      await panel?.permissionOverwrites.edit(id,{ViewChannel:null,ReadMessageHistory:null,SendMessages:null});
-      await voice.permissionOverwrites.edit(id,{ViewChannel:null,Connect:null,Speak:null});
+    const changes=[];
+    try{
+      for(const id of managedIds){
+        if(id===room.ownerId)continue;
+        changes.push({
+          id,
+          panelBefore:panel?.permissionOverwrites.cache.get(id),
+          voiceBefore:voice.permissionOverwrites.cache.get(id)
+        });
+        await panel?.permissionOverwrites.edit(id,{ViewChannel:null,ReadMessageHistory:null,SendMessages:null});
+        await voice.permissionOverwrites.edit(id,{ViewChannel:null,Connect:null,Speak:null});
+      }
+      room.accessUsers=new Set([room.ownerId]);
+      room.accessRoles=new Set();
+      room.bannedUsers=new Set();
+      room.permissionsDirty=false;
+    }catch(e){
+      for(const change of changes.reverse()){
+        await panel?.permissionOverwrites.edit(change.id,permissionPatch(change.panelBefore,[['ViewChannel',PermissionFlagsBits.ViewChannel],['ReadMessageHistory',PermissionFlagsBits.ReadMessageHistory],['SendMessages',PermissionFlagsBits.SendMessages]])).catch(()=>{});
+        await voice.permissionOverwrites.edit(change.id,permissionPatch(change.voiceBefore,[['ViewChannel',PermissionFlagsBits.ViewChannel],['Connect',PermissionFlagsBits.Connect],['Speak',PermissionFlagsBits.Speak]])).catch(()=>{});
+      }
+      room.permissionsDirty=true;
+      throw e;
     }
-    room.accessUsers=new Set([room.ownerId]);room.accessRoles=new Set();room.bannedUsers=new Set();
   }
   else if(action==='sync-perms')await syncPermissions(room,guild,client);
   else if(action==='toggle-sync')room.syncPermissions=room.syncPermissions===false;
@@ -1157,13 +1183,18 @@ async function recover(client,rooms){
         continue;
       }
 
-      const saved=await client.db?.get?.(guild.id,'tempvc:'+voice.id,null);
+      let saved=null;
+      try{
+        saved=await client.db?.get?.(guild.id,'tempvc:'+voice.id,null);
+      }catch(e){
+        console.error('[TempVC] Failed to read persisted room state:',e?.message||e);
+      }
       const hasSavedState=saved?.version===1&&/^\d{17,20}$/.test(String(saved.ownerId||''));
       const room={
         guildId:guild.id,
         voiceChannelId:voice.id,
         panelChannelId:channel.id,
-        panelMessageId:null,
+        panelMessageId:hasSavedState&&/^\d{17,20}$/.test(String(saved.panelMessageId||''))?String(saved.panelMessageId):null,
         ownerId:hasSavedState?String(saved.ownerId):owner,
         createdAt:channel.createdTimestamp||Date.now(),
         locked:hasSavedState?!!saved.locked:!!voice.permissionOverwrites.cache.get(guild.roles.everyone.id)?.deny.has(PermissionFlagsBits.Connect),
@@ -1208,6 +1239,15 @@ async function recover(client,rooms){
         }
       }
 
+      if(!room.panelMessageId){
+        const existing=await channel.messages.fetch({limit:25}).then(messages=>[
+          ...messages.values()
+        ].find(message=>message.author?.id===client.user?.id&&message.components?.some(row=>row.components?.some(component=>component.customId==='rn-tvc:page')))).catch(e=>{
+          console.error('[TempVC] Failed to inspect existing panel messages:',e?.message||e);
+          return null;
+        });
+        if(existing)room.panelMessageId=existing.id;
+      }
       rooms.set(voice.id,room);
       await refresh(client,room,'overview').catch(e=>console.error('[TempVC] Recovery refresh failed:',e?.message||e));
     }
