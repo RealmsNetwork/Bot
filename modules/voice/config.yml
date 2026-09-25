@@ -66,6 +66,11 @@ temporaryVoice:
   syncPermissions: true
   maxBitrate: 384000
   cleanupIntervalSeconds: 30
+  panelEnabled: true
+  panelSuffix: "-panel"
+  panelAutoPin: true
+  panelAllowUserAccess: true
+  panelAllowRoleAccess: true
 
 branding:
   panelTitle: "Voice Control"
