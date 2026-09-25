@@ -1,5 +1,5 @@
 require('dotenv').config({ quiet: true });
-const fs=require('node:fs');const path=require('node:path');
+const path=require('node:path');
 const {Client,Collection,Events,GatewayIntentBits,Partials,REST,Routes,MessageFlags}=require('discord.js');
 const {ok,boot,error,warn,info}=require('./lib/logger');
 const {loadConfig}=require('./lib/config');const {createDatabase}=require('./lib/database');const {loadModules,refreshCommands,moduleDirectories}=require('./lib/module-loader');const {authorize}=require('./lib/permissions');
