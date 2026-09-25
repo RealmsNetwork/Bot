@@ -64,9 +64,10 @@ async function createTempRoom(member,client){
   if(Number.isInteger(Number(c.userLimit))&&Number(c.userLimit)>=0)options.userLimit=Number(c.userLimit);
 
   let channel=null;
+  let room=null;
   try{
     channel=await guild.channels.create(options);
-    const room={guildId:guild.id,voiceChannelId:channel.id,panelChannelId:null,panelMessageId:null,ownerId:member.id,createdAt:Date.now(),locked:!!c.defaultLocked,hidden:!!c.defaultHidden,accessUsers:new Set([member.id]),accessRoles:new Set(),controlUsers:new Set([member.id]),controlRoles:new Set(),bannedUsers:new Set(),tts:{},page:'overview',emptySince:null,recoveryGraceUntil:0};
+    room={guildId:guild.id,voiceChannelId:channel.id,panelChannelId:null,panelMessageId:null,ownerId:member.id,createdAt:Date.now(),locked:!!c.defaultLocked,hidden:!!c.defaultHidden,accessUsers:new Set([member.id]),accessRoles:new Set(),controlUsers:new Set([member.id]),controlRoles:new Set([member.id]),bannedUsers:new Set(),tts:{},page:'overview',emptySince:null,recoveryGraceUntil:0};
     tempRooms.set(channel.id,room);
     await channel.permissionOverwrites.edit(member.id,{Connect:true,Speak:true,ViewChannel:true});
     await tempPanel.create(client,member,channel,room);
@@ -75,9 +76,11 @@ async function createTempRoom(member,client){
     await member.voice.setChannel(channel);
     return channel;
   }catch(e){
-    if(channel){
-      tempRooms.delete(channel.id);
-      await channel.delete('Temporary VC creation failed; cleaning up').catch(()=>{});
+    if(room){
+      await tempPanel.deleteRoom(client,tempRooms,room,guild,'Temporary VC creation failed; cleaning up').catch(cleanupError=>console.error('[TempVC] Failed transactional room cleanup:',cleanupError?.message||cleanupError));
+      tempRooms.delete(channel?.id);
+    }else if(channel){
+      await channel.delete('Temporary VC creation failed; cleaning up').catch(cleanupError=>console.error('[TempVC] Failed channel cleanup:',cleanupError?.message||cleanupError));
     }
     throw e;
   }
