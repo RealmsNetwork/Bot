@@ -93,8 +93,20 @@ async function persistRoom(client, room) {
 }
 
 async function deletePersistedRoom(client, room) {
-  if (!client?.db?.delete || !room?.guildId || !room?.voiceChannelId) return;
-  await client.db.delete(room.guildId, stateKey(room)).catch(e => console.error('[TempVC] Failed to delete room state:', e?.message || e));
+  if (!client?.db?.delete || !room?.guildId || !room?.voiceChannelId) return true;
+  for(let attempt=1;attempt<=3;attempt++){
+    try{
+      await client.db.delete(room.guildId,stateKey(room));
+      return true;
+    }catch(e){
+      if(attempt===3){
+        console.error('[TempVC] Failed to delete room state after 3 attempts:',e?.message||e);
+        return false;
+      }
+      await sleep(250*2**(attempt-1));
+    }
+  }
+  return false;
 }
 
 function emptyGraceMs(client) {
