@@ -440,7 +440,6 @@ async function playNext(room,client) {
     room.ttsPlaying = false;
     if (file) await fs.promises.rm(file, { force: true }).catch(() => {});
     if (room.ttsCurrentFile === file) room.ttsCurrentFile = null;
-    if (stillCurrent) await playNext(room,client);
     return;
   }
   room.ttsQueue.shift();
