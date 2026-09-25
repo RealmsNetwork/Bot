@@ -70,10 +70,26 @@ async function hashFile(file) {
   });
 }
 
+function hasAudioSignature(buffer) {
+  if (!buffer || buffer.length < 4) return false;
+  if (buffer.subarray(0, 4).toString('ascii') === 'OggS') return true;
+  if (buffer.subarray(0, 4).toString('ascii') === 'RIFF' && buffer.subarray(8, 12).toString('ascii') === 'WAVE') return true;
+  if (buffer.subarray(0, 3).toString('ascii') === 'ID3') return true;
+  return buffer[0] === 0xff && (buffer[1] & 0xe0) === 0xe0;
+}
+
 async function validateAudioFile(file, maxBytes = MAX_AUDIO_BYTES) {
   const stat = await fs.promises.stat(file);
   if (!stat.isFile() || stat.size <= 0) throw new Error('TTS provider returned an empty audio file.');
   if (stat.size > maxBytes) throw new Error('TTS audio response exceeded the safety size limit.');
+  const head = Buffer.alloc(Math.min(32, stat.size));
+  const fd = await fs.promises.open(file, 'r');
+  try {
+    await fd.read(head, 0, head.length, 0);
+  } finally {
+    await fd.close();
+  }
+  if (!hasAudioSignature(head)) throw new Error('TTS provider returned an invalid audio file.');
   return { size: stat.size, sha256: await hashFile(file) };
 }
 
@@ -169,6 +185,7 @@ function volumeValue(value) {
 }
 
 async function synthesizeEdge(text, file, settings = {}) {
+  const timeoutMs = Math.max(5000, Number(settings.timeoutMs ?? settings.timeout ?? DEFAULT_HTTP_TIMEOUT));
   const tts = new EdgeTTS({
     voice: settings.voice || 'en-US-AriaNeural',
     lang: settings.lang || 'en-US',
@@ -176,9 +193,20 @@ async function synthesizeEdge(text, file, settings = {}) {
     rate: rateValue(settings.rate),
     pitch: settings.pitch || 'default',
     volume: volumeValue(settings.volume),
-    timeout: Math.max(5000, Number(settings.timeoutMs ?? settings.timeout ?? DEFAULT_HTTP_TIMEOUT))
+    timeout: timeoutMs
   });
-  await tts.ttsPromise(String(text), file);
+  let timer;
+  try {
+    await Promise.race([
+      tts.ttsPromise(String(text), file),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error('Edge TTS request timed out.')), timeoutMs);
+        timer.unref?.();
+      })
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
   return file;
 }
 
