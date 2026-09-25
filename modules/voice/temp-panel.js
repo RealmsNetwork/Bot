@@ -89,9 +89,7 @@ function canControl(interaction, room, client) {
   normalizeRoom(room);
   if (room.ownerId === interaction.user.id) return true;
   const c = tempCfg(client);
-  if (c.ownerOnlyControl !== false) return false;
-  if (room.controlUsers.has(interaction.user.id)) return true;
-  return interaction.member?.roles?.cache ? [...room.controlRoles].some(id => interaction.member.roles.cache.has(id)) : false;
+  return c.ownerOnlyControl === false || room.ownerId === interaction.user.id;
 }
 
 function pageMenu(page) {
