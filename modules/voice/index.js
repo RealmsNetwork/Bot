@@ -1,6 +1,7 @@
 const {SlashCommandBuilder,EmbedBuilder,ChannelType,MessageFlags}=require('discord.js');
 const {joinVoiceChannel,createAudioPlayer,createAudioResource,AudioPlayerStatus,VoiceConnectionStatus,entersState}=require('@discordjs/voice');
 const play=require('play-dl');
+const tts=require('./tts-service');
 const tempPanel=require('./temp-panel');
 const ttsCommands=require('./tts-commands');
 const sessions=new Map();
@@ -11,13 +12,36 @@ function edgePercent(value,neutral=100){const n=Number(value);if(!Number.isFinit
 function brand(client){const b=client.config.branding||{};return{server:b.serverName||'RealmsNetwork',bot:b.botName||'RealmsNetwork Bot',color:b.embedColor||'#8b5cf6',footer:b.footer||b.serverName||'RealmsNetwork'};}
 function embed(client,title,description){const b=brand(client);return new EmbedBuilder().setColor(b.color).setTitle(title).setDescription(description).setFooter({text:b.footer}).setTimestamp();}
 function session(guildId){if(!sessions.has(guildId))sessions.set(guildId,{connection:null,player:createAudioPlayer(),queue:[],current:null,textChannelId:null,volume:100});return sessions.get(guildId);}
-async function connect(member){if(!member?.voice?.channel)return null;const s=session(member.guild.id);if(s.connection?.joinConfig?.channelId===member.voice.channel.id)return s;const connection=joinVoiceChannel({channelId:member.voice.channel.id,guildId:member.guild.id,adapterCreator:member.guild.voiceAdapterCreator,selfDeaf:true});s.connection=connection;connection.subscribe(s.player);await entersState(connection,VoiceConnectionStatus.Ready,15000);return s;}
+async function connect(member,client){
+  if(!member?.voice?.channel)return null;
+  const s=session(member.guild.id);
+  if(s.connection?.state?.status===VoiceConnectionStatus.Destroyed)s.connection=null;
+  if(s.connection?.joinConfig?.channelId===member.voice.channel.id)return s;
+  if(s.connection){
+    const previous=s.connection;
+    const ttsRoom=[...tempRooms.values()].find(r=>r.ttsConnection===previous);
+    if(ttsRoom)await tts.stop(ttsRoom,client).catch(e=>console.error('[Voice/TTS] Failed to stop TTS before channel switch:',e?.message||e));
+    previous.destroy();
+    s.connection=null;
+  }
+  const connection=joinVoiceChannel({channelId:member.voice.channel.id,guildId:member.guild.id,adapterCreator:member.guild.voiceAdapterCreator,selfDeaf:true});
+  s.connection=connection;
+  connection.subscribe(s.player);
+  try{
+    await entersState(connection,VoiceConnectionStatus.Ready,15000);
+  }catch(e){
+    if(s.connection===connection)s.connection=null;
+    connection.destroy();
+    throw e;
+  }
+  return s;
+}
 async function playNext(guildId,client){const s=sessions.get(guildId);if(!s||!s.queue.length){if(s)s.current=null;return;}const track=s.queue.shift();s.current=track;try{const stream=await play.stream(track.url,{quality:2,discordPlayerCompatibility:false});const resource=createAudioResource(stream.stream,{inputType:stream.type,inlineVolume:true});resource.volume?.setVolume(Math.max(0,Math.min(1.5,s.volume/100)));s.player.play(resource);if(s.textChannelId){const ch=client.channels.cache.get(s.textChannelId);if(ch?.isTextBased()&&cfg(client).music.announceNowPlaying)await ch.send({embeds:[embed(client,'Now Playing',`**${track.title}**\n${track.url}`)]}).catch(()=>{});}}catch(e){console.error('[Voice/Music]',e.message);s.current=null;await playNext(guildId,client);}}
 function ensurePlayerHooks(guildId,client){const s=session(guildId);if(s._hooks)return;s._hooks=true;s.player.on(AudioPlayerStatus.Idle,()=>playNext(guildId,client).catch(e=>console.error('[Voice/Music]',e)));s.player.on('error',e=>{console.error('[Voice/Music]',e.message);playNext(guildId,client).catch(()=>{});});}
 async function createTempRoom(member,client){const c=cfg(client).temporaryVoice||{};if(!c.enabled||!c.triggerChannelId||member.voice.channelId!==c.triggerChannelId)return null;const guild=member.guild;const name=String(c.nameTemplate||"{user}'s Room").replaceAll('{user}',member.displayName).replaceAll('{username}',member.user.username).slice(0,100);const options={name,type:ChannelType.GuildVoice,permissionOverwrites:[]};if(c.categoryId)options.parent=c.categoryId;if(Number(c.bitrate)>0)options.bitrate=Math.min(Number(c.bitrate),Number(c.maxBitrate)||384000);if(Number.isInteger(Number(c.userLimit))&&Number(c.userLimit)>=0)options.userLimit=Number(c.userLimit);const channel=await guild.channels.create(options);tempRooms.set(channel.id,{guildId:guild.id,voiceChannelId:channel.id,panelChannelId:null,panelMessageId:null,ownerId:member.id,createdAt:Date.now(),locked:!!c.defaultLocked,hidden:!!c.defaultHidden,accessUsers:new Set([member.id]),accessRoles:new Set(),controlUsers:new Set([member.id]),controlRoles:new Set(),bannedUsers:new Set(),tts:{},page:'overview'});await channel.permissionOverwrites.edit(member.id,{Connect:true,Speak:true,ViewChannel:true});await tempPanel.create(client,member,channel,tempRooms.get(channel.id)).catch(e=>console.error(`[TempVC] Panel creation failed for ${channel.id}: ${e?.stack||e?.message||e}`));if(c.defaultLocked)await channel.permissionOverwrites.edit(guild.roles.everyone,{Connect:false});if(c.defaultHidden)await channel.permissionOverwrites.edit(guild.roles.everyone,{ViewChannel:false});await member.voice.setChannel(channel).catch(()=>{});return channel;}
 function ownerOf(channelId){return tempRooms.get(channelId);}
 const commands=[
-{data:new SlashCommandBuilder().setName('play').setDescription('Play or queue music').addStringOption(o=>o.setName('query').setDescription('URL or search query').setRequired(true)),execute:async(i,client)=>{const c=cfg(client).music;if(!c.enabled)return i.reply({content:'Music is disabled.',flags:MessageFlags.Ephemeral});if(!i.member.voice.channel)return i.reply({content:'Join a voice channel first.',flags:MessageFlags.Ephemeral});await i.deferReply();ensurePlayerHooks(i.guildId,client);const query=i.options.getString('query',true);let result;try{if(/^https?:\/\//i.test(query)){const info=await play.video_basic_info(query);result=[{title:info.video_details.title,url:info.video_details.url,duration:info.video_details.durationInSec||0}];}else{const found=await play.search(query,{limit:Math.max(1,Math.min(c.searchLimit||5,10)),source:{youtube:'video'}});result=found.map(x=>({title:x.title,url:x.url,duration:x.durationInSec||0}));}}catch(e){return i.editReply(`Music search failed: ${e.message}`);}if(!result?.length)return i.editReply('No results found.');const s=await connect(i.member);for(const track of result.slice(0,1)){if(track.duration>(c.maxTrackLengthSeconds||7200))continue;if(s.queue.length>=(c.maxQueueSize||100))break;s.queue.push(track);}s.textChannelId=i.channelId;const wasPlaying=!!s.current;await i.editReply(wasPlaying?`Queued **${result[0].title}**.`:`Starting **${result[0].title}**.`);if(!wasPlaying)await playNext(i.guildId,client);}},
+{data:new SlashCommandBuilder().setName('play').setDescription('Play or queue music').addStringOption(o=>o.setName('query').setDescription('URL or search query').setRequired(true)),execute:async(i,client)=>{const c=cfg(client).music;if(!c.enabled)return i.reply({content:'Music is disabled.',flags:MessageFlags.Ephemeral});if(!i.member.voice.channel)return i.reply({content:'Join a voice channel first.',flags:MessageFlags.Ephemeral});await i.deferReply();ensurePlayerHooks(i.guildId,client);const query=i.options.getString('query',true);let result;try{if(/^https?:\/\//i.test(query)){const info=await play.video_basic_info(query);result=[{title:info.video_details.title,url:info.video_details.url,duration:info.video_details.durationInSec||0}];}else{const found=await play.search(query,{limit:Math.max(1,Math.min(c.searchLimit||5,10)),source:{youtube:'video'}});result=found.map(x=>({title:x.title,url:x.url,duration:x.durationInSec||0}));}}catch(e){return i.editReply(`Music search failed: ${e.message}`);}if(!result?.length)return i.editReply('No results found.');const s=await connect(i.member,client);for(const track of result.slice(0,1)){if(track.duration>(c.maxTrackLengthSeconds||7200))continue;if(s.queue.length>=(c.maxQueueSize||100))break;s.queue.push(track);}s.textChannelId=i.channelId;const wasPlaying=!!s.current;await i.editReply(wasPlaying?`Queued **${result[0].title}**.`:`Starting **${result[0].title}**.`);if(!wasPlaying)await playNext(i.guildId,client);}},
 {data:new SlashCommandBuilder().setName('skip').setDescription('Skip the current track'),execute:async(i,client)=>{const s=sessions.get(i.guildId);if(!s?.current)return i.reply({content:'Nothing is playing.',flags:MessageFlags.Ephemeral});s.player.stop(true);return i.reply('Skipped.');}},
 {data:new SlashCommandBuilder().setName('stop').setDescription('Stop music and clear the queue'),execute:async(i)=>{const s=sessions.get(i.guildId);if(!s)return i.reply({content:'Nothing is playing.',flags:MessageFlags.Ephemeral});s.queue=[];s.current=null;s.player.stop(true);s.connection?.destroy();sessions.delete(i.guildId);return i.reply('Stopped and cleared the queue.');}},
 {data:new SlashCommandBuilder().setName('queue').setDescription('Show the music queue'),execute:async(i,client)=>{const s=sessions.get(i.guildId);return i.reply({embeds:[embed(client,'Music Queue',s?.queue?.length?s.queue.map((x,n)=>`${n+1}. **${x.title}**`).join('\n'):'The queue is empty.')]});}},
