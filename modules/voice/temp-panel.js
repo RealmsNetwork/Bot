@@ -597,6 +597,7 @@ function buildPayload(client, room, extras = {}) {
 
 async function refresh(client, room, page = room.page || 'overview') {
   normalizeRoom(room,client);
+  if(room.permissionsDirty)throw new Error('Temporary VC permissions are out of sync. Synchronize permissions before refreshing the panel.');
   if (!(await persistRoom(client,room))) throw new Error('Temporary VC state could not be persisted. The change was not safely confirmed.');
   room.page=page;
   const guild=client.guilds.cache.get(room.guildId);
@@ -713,22 +714,41 @@ function permissionPatch(overwrite, permissions) {
 
 async function syncPermissions(room,guild,client){
   normalizeRoom(room,client);
-  const voice=guild.channels.cache.get(room.voiceChannelId);
-  const panel=guild.channels.cache.get(room.panelChannelId);
-  if(!voice||!panel)throw new Error('Temporary VC permission targets no longer exist.');
-
-  for(const id of room.accessUsers){
-    if(room.bannedUsers.has(id))continue;
-    await panel.permissionOverwrites.edit(id,{ViewChannel:true,ReadMessageHistory:true,SendMessages:false});
-    await voice.permissionOverwrites.edit(id,{ViewChannel:true,Connect:true,Speak:true});
-  }
-  for(const id of room.accessRoles){
-    await panel.permissionOverwrites.edit(id,{ViewChannel:true,ReadMessageHistory:true,SendMessages:false});
-    await voice.permissionOverwrites.edit(id,{ViewChannel:true,Connect:true,Speak:true});
-  }
-  for(const id of room.bannedUsers){
-    await voice.permissionOverwrites.edit(id,{ViewChannel:false,Connect:false});
-  }
+  if(room.permissionSyncPromise)return room.permissionSyncPromise;
+  const promise=(async()=>{
+    const voice=guild.channels.cache.get(room.voiceChannelId);
+    const panel=guild.channels.cache.get(room.panelChannelId);
+    if(!voice||!panel)throw new Error('Temporary VC permission targets no longer exist.');
+    for(let attempt=1;attempt<=3;attempt++){
+      try{
+        for(const id of room.accessUsers){
+          if(room.bannedUsers.has(id))continue;
+          await panel.permissionOverwrites.edit(id,{ViewChannel:true,ReadMessageHistory:true,SendMessages:false});
+          await voice.permissionOverwrites.edit(id,{ViewChannel:true,Connect:true,Speak:true});
+        }
+        for(const id of room.accessRoles){
+          await panel.permissionOverwrites.edit(id,{ViewChannel:true,ReadMessageHistory:true,SendMessages:false});
+          await voice.permissionOverwrites.edit(id,{ViewChannel:true,Connect:true,Speak:true});
+        }
+        for(const id of room.bannedUsers){
+          await voice.permissionOverwrites.edit(id,{ViewChannel:false,Connect:false});
+        }
+        room.permissionsDirty=false;
+        return true;
+      }catch(e){
+        room.permissionsDirty=true;
+        if(attempt===3){
+          console.error('[TempVC] Permission synchronization failed after 3 attempts:',e?.message||e);
+          throw e;
+        }
+        await sleep(250*2**(attempt-1));
+      }
+    }
+    return false;
+  })();
+  room.permissionSyncPromise=promise;
+  try{return await promise;}
+  finally{if(room.permissionSyncPromise===promise)room.permissionSyncPromise=null;}
 }
 
 async function grant(room,guild,id,type,client){
@@ -749,9 +769,11 @@ async function grant(room,guild,id,type,client){
   const voice=guild.channels.cache.get(room.voiceChannelId);
   const panelBefore=panel?.permissionOverwrites.cache.get(id);
   const voiceBefore=voice?.permissionOverwrites.cache.get(id);
+  if(!panel)throw new Error('Temporary VC control panel no longer exists.');
   targetSet.add(id);
   try{
-    await syncPermissions(room,guild,client);
+    if(room.syncPermissions!==false)await syncPermissions(room,guild,client);
+    else await panel.permissionOverwrites.edit(id,{ViewChannel:true,ReadMessageHistory:true,SendMessages:false});
   }catch(e){
     if(!hadAccess){
       targetSet.delete(id);
