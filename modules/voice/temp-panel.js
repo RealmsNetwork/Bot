@@ -807,7 +807,11 @@ async function handleSelect(interaction,client,rooms){
   if(!value)return panelNotice(interaction,'Nothing was selected.');
   if(kind==='page')return panelUpdate(interaction,client,room,value);
   if(!canControl(interaction,room,client,kind))return panelNotice(interaction,'Only the room owner can use that selection.');
-  if(kind==='tts-provider'){room.tts.provider=value;return panelUpdate(interaction,client,room,'tts');}
+  if(kind==='tts-provider'){
+    if(!['edge','google','polly'].includes(value))return panelNotice(interaction,'That TTS provider is not supported.');
+    room.tts.provider=value;
+    return panelUpdate(interaction,client,room,'tts');
+  }
   if(kind==='tts-voice'){
     const voices=await tts.listVoices().catch(()=>[]);
     const match=voices.find(v=>(v.ShortName||v.Name)===value);
@@ -815,7 +819,12 @@ async function handleSelect(interaction,client,rooms){
     room.tts.voice=value;room.tts.lang=match.Locale||room.tts.lang;
     return panelUpdate(interaction,client,room,'tts');
   }
-  if(kind==='tts-language'){room.tts.lang=value;return panelUpdate(interaction,client,room,'tts');}
+  if(kind==='tts-language'){
+    const languages=await tts.listLanguages().catch(e=>{console.error('[TempVC/TTS] Languages:',e?.message||e);return[];});
+    if(!languages.some(x=>String(x.code)===String(value)))return panelNotice(interaction,'That language is no longer available. Refresh and try again.');
+    room.tts.lang=value;
+    return panelUpdate(interaction,client,room,'tts');
+  }
   if(kind==='member'||kind==='access-user'||kind==='access-role'){
     rememberSelection(interaction,kind,value);
     return panelNotice(interaction,kind==='member'?'Selected <@'+value+'>.':'Selected '+(kind==='access-role'?'<@&'+value+'>':'<@'+value+'>')+'.');
