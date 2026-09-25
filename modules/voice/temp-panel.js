@@ -535,6 +535,20 @@ async function getMember(interaction){
   return interaction.guild.members.cache.get(id)||await interaction.guild.members.fetch(id).catch(()=>null);
 }
 
+async function panelUpdate(interaction,client,room,page){
+  const msg=await refresh(client,room,page);
+  if(!msg)return interaction.editReply({content:'The temporary VC panel is no longer available.',embeds:[],components:[]}).catch(()=>{});
+  const payload={
+    content:msg.content || undefined,
+    embeds:(msg.embeds||[]).map(x=>typeof x.toJSON==='function'?x.toJSON():x),
+    components:(msg.components||[]).map(x=>typeof x.toJSON==='function'?x.toJSON():x)
+  };
+  if(interaction.deferred||interaction.replied)return interaction.editReply(payload).catch(()=>{});
+  return interaction.update(payload).catch(async e=>{
+    console.error('[TempVC/Panel] Interaction update failed:',e?.message||e);
+  });
+}
+
 async function handleButton(interaction,client,rooms){
   const room=roomFromPanel(interaction.channelId,rooms);
   if(!room||!canAccess(interaction,room))return interaction.reply({content:'You do not have access to this panel.',ephemeral:true});
@@ -542,11 +556,11 @@ async function handleButton(interaction,client,rooms){
   const action=interaction.customId.slice('rn-tvc:'.length);
   if(!canControl(interaction,room,client,action))return interaction.reply({content:'Only the room owner can use that control.',ephemeral:true});
 
-  if(['overview','room','members','moderation','access','tts','permissions','utilities','danger'].includes(action))return interaction.update(await refresh(client,room,action));
-  if(action==='refresh')return interaction.update(await refresh(client,room,room.page));
+  if(['overview','room','members','moderation','access','tts','permissions','utilities','danger'].includes(action))return panelUpdate(interaction,client,room,action);
+  if(action==='refresh')return panelUpdate(interaction,client,room,room.page);
   if(action==='tts-voices'||action==='tts-languages'){
     room.ttsBrowser={kind:action==='tts-voices'?'voices':'languages',page:0};
-    return interaction.update(await refresh(client,room,action));
+    return panelUpdate(interaction,client,room,action);
   }
   if(action.startsWith('voice-')||action.startsWith('lang-')){
     const kind=action.startsWith('voice-')?'voices':'languages';
@@ -559,7 +573,7 @@ async function handleButton(interaction,client,rooms){
     else if(action===prefix+'next')p=Math.min(pages-1,p+1);
     else if(action===prefix+'last')p=pages-1;
     room.ttsBrowser={kind,page:p};
-    return interaction.update(await refresh(client,room,kind==='voices'?'tts-voices':'tts-languages'));
+    return panelUpdate(interaction,client,room,kind==='voices'?'tts-voices':'tts-languages');
   }
 
   const guild=interaction.guild;
@@ -656,7 +670,7 @@ async function handleButton(interaction,client,rooms){
       new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('value').setLabel('Type DELETE to confirm').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(6))
     ));
   }
-  return interaction.update(await refresh(client,room,room.page));
+  return panelUpdate(interaction,client,room,room.page);
 }
 
 async function handleSelect(interaction,client,rooms){
@@ -666,17 +680,17 @@ async function handleSelect(interaction,client,rooms){
   const kind=interaction.customId.slice('rn-tvc:'.length);
   const value=interaction.values?.[0];
   if(!value)return interaction.reply({content:'Nothing was selected.',ephemeral:true});
-  if(kind==='page')return interaction.update(await refresh(client,room,value));
+  if(kind==='page')return panelUpdate(interaction,client,room,value);
   if(!canControl(interaction,room,client,kind))return interaction.reply({content:'Only the room owner can use that selection.',ephemeral:true});
-  if(kind==='tts-provider'){room.tts.provider=value;return interaction.update(await refresh(client,room,'tts'));}
+  if(kind==='tts-provider'){room.tts.provider=value;return panelUpdate(interaction,client,room,'tts');}
   if(kind==='tts-voice'){
     const voices=await tts.listVoices().catch(()=>[]);
     const match=voices.find(v=>(v.ShortName||v.Name)===value);
     if(!match)return interaction.reply({content:'That voice is no longer available. Refresh and try again.',ephemeral:true});
     room.tts.voice=value;room.tts.lang=match.Locale||room.tts.lang;
-    return interaction.update(await refresh(client,room,'tts'));
+    return panelUpdate(interaction,client,room,'tts');
   }
-  if(kind==='tts-language'){room.tts.lang=value;return interaction.update(await refresh(client,room,'tts'));}
+  if(kind==='tts-language'){room.tts.lang=value;return panelUpdate(interaction,client,room,'tts');}
   if(kind==='member'||kind==='access-user'||kind==='access-role'){
     selections.set(selectionKey(interaction,kind),value);
     return interaction.reply({content:kind==='member'?'Selected <@'+value+'>.':'Selected '+(kind==='access-role'?'<@&'+value+'>':'<@'+value+'>')+'.',ephemeral:true});
