@@ -65,7 +65,7 @@ function roomFromPanel(channelId, rooms) {
 }
 
 function selectionKey(interaction, kind) {
-  return interaction.guildId + ':' + interaction.user.id + ':' + kind;
+  return interaction.guildId + ':' + interaction.channelId + ':' + interaction.user.id + ':' + kind;
 }
 
 function selected(interaction, kind) {
@@ -120,10 +120,62 @@ function canAccess(interaction, room) {
 }
 
 function ownerOnlyAction(action) {
-  return ['claim','delete','reset-access','transfer-selected'].includes(action);
+  return [
+    'claim','delete','reset-access','transfer-selected','grant-user','revoke-user',
+    'grant-role','revoke-role','panel-selected','revoke-panel-selected',
+    'toggle-sync','toggle-operators','reset-room','disconnect-bot'
+  ].includes(action);
+}
+
+function actionEnabled(client, action) {
+  const c = tc(client);
+  const disabled = new Set([
+    ['rename', c.allowOwnerRename === false],
+    ['limit', c.allowOwnerLimit === false],
+    ['bitrate', c.allowOwnerBitrate === false],
+    ['lock', c.allowOwnerLock === false],
+    ['unlock', c.allowOwnerUnlock === false],
+    ['hide', c.allowOwnerHide === false],
+    ['unhide', c.allowOwnerUnhide === false],
+    ['claim', c.allowOwnerClaim === false],
+    ['transfer-selected', c.allowOwnerTransfer === false],
+    ['kick', c.allowOwnerKick === false],
+    ['mute', c.allowOwnerMute === false],
+    ['unmute', c.allowOwnerMute === false],
+    ['deafen', c.allowOwnerDeafen === false],
+    ['undeafen', c.allowOwnerDeafen === false],
+    ['ban', c.allowOwnerBan === false],
+    ['unban', c.allowOwnerBan === false],
+    ['tts-enable', c.allowOwnerTts === false || c.panelAllowTtsControl === false],
+    ['tts-disable', c.allowOwnerTts === false || c.panelAllowTtsControl === false],
+    ['autotts-enable', c.allowOwnerTts === false || c.panelAllowTtsControl === false],
+    ['autotts-disable', c.allowOwnerTts === false || c.panelAllowTtsControl === false],
+    ['prefix-enable', c.allowOwnerTts === false || c.panelAllowTtsControl === false],
+    ['prefix-disable', c.allowOwnerTts === false || c.panelAllowTtsControl === false],
+    ['tts-stop', c.allowOwnerTts === false || c.panelAllowTtsControl === false],
+    ['speak', c.allowOwnerTts === false || c.panelAllowTtsControl === false],
+    ['volume', c.allowOwnerTts === false || c.panelAllowTtsControl === false],
+    ['rate-down', c.allowOwnerTts === false || c.panelAllowTtsControl === false],
+    ['rate-up', c.allowOwnerTts === false || c.panelAllowTtsControl === false],
+    ['tts-voices', c.allowOwnerTts === false || c.panelAllowTtsControl === false],
+    ['tts-languages', c.allowOwnerTts === false || c.panelAllowTtsControl === false],
+    ['tts-voice-manual', c.allowOwnerTts === false || c.panelAllowTtsControl === false],
+    ['tts-provider', c.allowOwnerTts === false || c.panelAllowTtsControl === false],
+    ['tts-language', c.allowOwnerTts === false || c.panelAllowTtsControl === false],
+    ['tts-voice', c.allowOwnerTts === false || c.panelAllowTtsControl === false],
+    ['grant-user', c.panelAllowUserAccess === false],
+    ['revoke-user', c.panelAllowUserAccess === false],
+    ['panel-selected', c.panelAllowUserAccess === false],
+    ['revoke-panel-selected', c.panelAllowUserAccess === false],
+    ['grant-role', c.panelAllowRoleAccess === false],
+    ['revoke-role', c.panelAllowRoleAccess === false]
+  ]);
+  const entry = [...disabled].find(([name]) => name === action);
+  return !entry?.[1];
 }
 
 function canControl(interaction, room, client, action) {
+  if (!actionEnabled(client, action)) return false;
   if (interaction.user.id === room.ownerId) return true;
   if (ownerOnlyAction(action)) return false;
   return room.operatorControls !== false;
@@ -634,8 +686,9 @@ async function handleButton(interaction,client,rooms){
   const guild=interaction.guild;
   const voice=guild.channels.cache.get(room.voiceChannelId);
   const c=tc(client);
-  const member=await getMember(interaction);
   if(!voice)return panelNotice(interaction,'The voice room no longer exists.');
+  const memberActions=new Set(['kick','ban','unban','mute','unmute','deafen','undeafen','transfer-selected','panel-selected','revoke-panel-selected']);
+  const member=memberActions.has(action)?await getMember(interaction):null;
 
   if(action==='lock'){room.locked=true;await voice.permissionOverwrites.edit(guild.roles.everyone,{Connect:false});}
   else if(action==='unlock'){room.locked=false;await voice.permissionOverwrites.edit(guild.roles.everyone,{Connect:true});}
@@ -681,6 +734,7 @@ async function handleButton(interaction,client,rooms){
   }
   else if(action==='transfer-selected'){
     if(!member)return panelNotice(interaction,'Select a member first.');
+    if(!targetIsInRoom(member,room))return panelNotice(interaction,'The new owner must be in this temporary voice room.');
     if(room.bannedUsers.has(member.id))return panelNotice(interaction,'That member is banned from the room.');
     room.ownerId=member.id;room.accessUsers.add(member.id);room.operatorControls=room.operatorControls!==false;
     await voice.permissionOverwrites.edit(member.id,{ViewChannel:true,Connect:true,Speak:true});
