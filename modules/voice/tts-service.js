@@ -357,9 +357,16 @@ async function playNext(room,client) {
 
 async function pump(room, client) {
   if (room.ttsPump) return room.ttsPump;
-  room.ttsPump = playNext(room, client).finally(() => {
-    room.ttsPump = null;
-  });
+  room.ttsPump = (async () => {
+    try {
+      await playNext(room, client);
+    } finally {
+      room.ttsPump = null;
+      if (!room.ttsPlaying && room.ttsQueue?.length) {
+        queueMicrotask(() => pump(room, client).catch(e => console.error('[TempVC/TTS] Queue restart:', e?.stack || e)));
+      }
+    }
+  })();
   return room.ttsPump;
 }
 
