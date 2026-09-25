@@ -33,8 +33,8 @@ function canControlTts(i, room) {
 function controlConfigEnabled(i) {
   const moduleConfig = i.client.modules.get('voice')?.config || {};
   const c = moduleConfig.temporaryVoice || {};
-  return c.allowOwnerTts !== false &&
-    c.panelAllowTtsControl !== false;
+  const ttsConfig = moduleConfig.tts || {};
+  return ttsConfig.enabled !== false && c.allowOwnerTts !== false;
 }
 
 function voiceSelectionEnabled(i) {
