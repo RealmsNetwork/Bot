@@ -10,7 +10,8 @@ const {
   ModalBuilder,
   TextInputBuilder,
   TextInputStyle,
-  PermissionFlagsBits
+  PermissionFlagsBits,
+  MessageFlags
 } = require('discord.js');
 const tts = require('./tts-service');
 
@@ -66,6 +67,23 @@ function selectionKey(interaction, kind) {
 
 function selected(interaction, kind) {
   return selections.get(selectionKey(interaction, kind));
+}
+
+async function panelNotice(interaction, content) {
+  const payload = { content, flags: MessageFlags.Ephemeral };
+  if (interaction.deferred || interaction.replied) return interaction.followUp(payload).catch(() => {});
+  return interaction.reply(payload).catch(() => {});
+}
+
+async function deferPanelInteraction(interaction) {
+  if (interaction.deferred || interaction.replied) return true;
+  try {
+    await interaction.deferUpdate();
+    return true;
+  } catch (e) {
+    console.error('[TempVC/Panel] deferUpdate:', e?.message || e);
+    return false;
+  }
 }
 
 function canAccess(interaction, room) {
@@ -552,11 +570,17 @@ async function panelUpdate(interaction,client,room,page){
 
 async function handleButton(interaction,client,rooms){
   const room=roomFromPanel(interaction.channelId,rooms);
-  if(!room||!canAccess(interaction,room))return interaction.reply({content:'You do not have access to this panel.',ephemeral:true});
+  if(!room||!canAccess(interaction,room))return interaction.reply({content:'You do not have access to this panel.',flags:MessageFlags.Ephemeral});
   normalizeRoom(room,client);
   const action=interaction.customId.slice('rn-tvc:'.length);
-  if(!canControl(interaction,room,client,action))return interaction.reply({content:'Only the room owner can use that control.',ephemeral:true});
+  if(!canControl(interaction,room,client,action))return panelNotice(interaction,'Only the room owner can use that control.');
 
+  const modalActions=['rename','limit','bitrate','region','slowmode','rate','volume','speak','tts-voice-manual'];
+  if(modalActions.includes(action))return showForm(interaction,action);
+  if(action==='delete')return interaction.showModal(new ModalBuilder().setCustomId('rn-tvc-modal:delete').setTitle('Delete Temporary Room').addComponents(
+    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('value').setLabel('Type DELETE to confirm').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(6))
+  ));
+  if(!(await deferPanelInteraction(interaction)))return;
   if(['overview','room','members','moderation','access','tts','permissions','utilities','danger'].includes(action))return panelUpdate(interaction,client,room,action);
   if(action==='refresh')return panelUpdate(interaction,client,room,room.page);
   if(action==='tts-voices'||action==='tts-languages'){
@@ -580,10 +604,8 @@ async function handleButton(interaction,client,rooms){
   const guild=interaction.guild;
   const voice=guild.channels.cache.get(room.voiceChannelId);
   const c=tc(client);
-
-  if(['rename','limit','bitrate','region','slowmode','rate','volume','speak','tts-voice-manual'].includes(action))return showForm(interaction,action);
   const member=await getMember(interaction);
-  if(!voice&&action!=='delete')return interaction.reply({content:'The voice room no longer exists.',ephemeral:true});
+  if(!voice)return panelNotice(interaction,'The voice room no longer exists.');
 
   if(action==='lock'){room.locked=true;await voice.permissionOverwrites.edit(guild.roles.everyone,{Connect:false});}
   else if(action==='unlock'){room.locked=false;await voice.permissionOverwrites.edit(guild.roles.everyone,{Connect:true});}
@@ -597,14 +619,14 @@ async function handleButton(interaction,client,rooms){
   }
   else if(action==='invite'){
     const invite=await voice.createInvite({maxAge:86400,maxUses:0,unique:true,reason:'Temporary VC invite'});
-    return interaction.reply({content:'Invite created: '+invite.url,ephemeral:true});
+    return panelNotice(interaction,'Invite created: '+invite.url);
   }
   else if(action==='kick'){
-    if(!member||member.id===interaction.user.id)return interaction.reply({content:'Select another member first.',ephemeral:true});
+    if(!member||member.id===interaction.user.id)return panelNotice(interaction,'Select another member first.');
     await member.voice.disconnect('Temporary VC kick');
   }
   else if(action==='ban'){
-    if(!member||member.id===interaction.user.id)return interaction.reply({content:'Select another member first.',ephemeral:true});
+    if(!member||member.id===interaction.user.id)return panelNotice(interaction,'Select another member first.');
     room.bannedUsers.add(member.id);
     room.accessUsers.delete(member.id);
     await voice.permissionOverwrites.edit(member.id,{ViewChannel:false,Connect:false});
@@ -612,37 +634,37 @@ async function handleButton(interaction,client,rooms){
     await member.voice.disconnect('Banned from temporary VC').catch(()=>{});
   }
   else if(action==='unban'){
-    if(!member)return interaction.reply({content:'Select a member first.',ephemeral:true});
+    if(!member)return panelNotice(interaction,'Select a member first.');
     room.bannedUsers.delete(member.id);
     await voice.permissionOverwrites.delete(member.id).catch(()=>{});
   }
   else if(action==='mute'||action==='unmute'){
-    if(!member||member.id===interaction.user.id)return interaction.reply({content:'Select another member first.',ephemeral:true});
+    if(!member||member.id===interaction.user.id)return panelNotice(interaction,'Select another member first.');
     await member.voice.setMute(action==='mute','Temporary VC moderation');
   }
   else if(action==='deafen'||action==='undeafen'){
-    if(!member||member.id===interaction.user.id)return interaction.reply({content:'Select another member first.',ephemeral:true});
+    if(!member||member.id===interaction.user.id)return panelNotice(interaction,'Select another member first.');
     await member.voice.setDeaf(action==='deafen','Temporary VC moderation');
   }
   else if(action==='transfer-selected'){
-    if(!member)return interaction.reply({content:'Select a member first.',ephemeral:true});
-    if(room.bannedUsers.has(member.id))return interaction.reply({content:'That member is banned from the room.',ephemeral:true});
+    if(!member)return panelNotice(interaction,'Select a member first.');
+    if(room.bannedUsers.has(member.id))return panelNotice(interaction,'That member is banned from the room.');
     room.ownerId=member.id;room.accessUsers.add(member.id);room.operatorControls=room.operatorControls!==false;
     await voice.permissionOverwrites.edit(member.id,{ViewChannel:true,Connect:true,Speak:true});
     await guild.channels.cache.get(room.panelChannelId)?.permissionOverwrites.edit(member.id,{ViewChannel:true,ReadMessageHistory:true,SendMessages:false});
   }
   else if(action==='panel-selected'){
-    if(!member)return interaction.reply({content:'Select a member first.',ephemeral:true});
+    if(!member)return panelNotice(interaction,'Select a member first.');
     await grant(room,guild,member.id,'user',client);
   }
   else if(action==='revoke-panel-selected'){
-    if(!member)return interaction.reply({content:'Select a member first.',ephemeral:true});
+    if(!member)return panelNotice(interaction,'Select a member first.');
     await revoke(room,guild,member.id,'user',client);
   }
-  else if(action==='grant-user'){const id=selected(interaction,'access-user');if(!id)return interaction.reply({content:'Select a user first.',ephemeral:true});await grant(room,guild,id,'user',client);}
-  else if(action==='revoke-user'){const id=selected(interaction,'access-user');if(!id)return interaction.reply({content:'Select a user first.',ephemeral:true});await revoke(room,guild,id,'user',client);}
-  else if(action==='grant-role'){const id=selected(interaction,'access-role');if(!id)return interaction.reply({content:'Select a role first.',ephemeral:true});await grant(room,guild,id,'role',client);}
-  else if(action==='revoke-role'){const id=selected(interaction,'access-role');if(!id)return interaction.reply({content:'Select a role first.',ephemeral:true});await revoke(room,guild,id,'role',client);}
+  else if(action==='grant-user'){const id=selected(interaction,'access-user');if(!id)return panelNotice(interaction,'Select a user first.');await grant(room,guild,id,'user',client);}
+  else if(action==='revoke-user'){const id=selected(interaction,'access-user');if(!id)return panelNotice(interaction,'Select a user first.');await revoke(room,guild,id,'user',client);}
+  else if(action==='grant-role'){const id=selected(interaction,'access-role');if(!id)return panelNotice(interaction,'Select a role first.');await grant(room,guild,id,'role',client);}
+  else if(action==='revoke-role'){const id=selected(interaction,'access-role');if(!id)return panelNotice(interaction,'Select a role first.');await revoke(room,guild,id,'role',client);}
   else if(action==='reset-access'){
     room.accessUsers=new Set([room.ownerId]);room.accessRoles=new Set();room.bannedUsers=new Set();
     for(const id of [...voice.permissionOverwrites.cache.keys()])if(id!==guild.roles.everyone.id&&id!==guild.members.me?.id&&id!==room.ownerId)await voice.permissionOverwrites.delete(id).catch(()=>{});
@@ -652,9 +674,9 @@ async function handleButton(interaction,client,rooms){
   else if(action==='sync-perms')await syncPermissions(room,guild,client);
   else if(action==='toggle-sync')room.syncPermissions=room.syncPermissions===false;
   else if(action==='toggle-operators')room.operatorControls=room.operatorControls===false;
-  else if(action==='rebuild'){room.panelMessageId=null;await refresh(client,room,room.page);return;}
+  else if(action==='rebuild'){room.panelMessageId=null;return panelUpdate(interaction,client,room,room.page);}
   else if(action==='disconnect-bot'){client.voiceSessions?.get(guild.id)?.connection?.destroy?.();room.ttsConnection?.destroy?.();}
-  else if(action==='room-chat')return interaction.reply({content:'Open <#'+room.voiceChannelId+'> to use Discord voice-channel chat and AutoTTS.',ephemeral:true});
+  else if(action==='room-chat')return panelNotice(interaction,'Open <#'+room.voiceChannelId+'> to use Discord voice-channel chat and AutoTTS.');
   else if(action==='tts-enable')room.tts.enabled=true;
   else if(action==='tts-disable')room.tts.enabled=false;
   else if(action==='autotts-enable')room.tts.autoTts=true;
@@ -666,53 +688,50 @@ async function handleButton(interaction,client,rooms){
   else if(action==='rate-down')room.tts.rate=Math.max(50,(Number(room.tts.rate)||100)-10);
   else if(action==='rate-up')room.tts.rate=Math.min(150,(Number(room.tts.rate)||100)+10);
   else if(action==='volume')return showForm(interaction,'volume');
-  else if(action==='delete'){
-    return interaction.showModal(new ModalBuilder().setCustomId('rn-tvc-modal:delete').setTitle('Delete Temporary Room').addComponents(
-      new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('value').setLabel('Type DELETE to confirm').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(6))
-    ));
-  }
   return panelUpdate(interaction,client,room,room.page);
 }
 
 async function handleSelect(interaction,client,rooms){
   const room=roomFromPanel(interaction.channelId,rooms);
-  if(!room||!canAccess(interaction,room))return interaction.reply({content:'You do not have access to this panel.',ephemeral:true});
+  if(!room||!canAccess(interaction,room))return panelNotice(interaction,'You do not have access to this panel.');
   normalizeRoom(room,client);
+  if(!(await deferPanelInteraction(interaction)))return;
   const kind=interaction.customId.slice('rn-tvc:'.length);
   const value=interaction.values?.[0];
-  if(!value)return interaction.reply({content:'Nothing was selected.',ephemeral:true});
+  if(!value)return panelNotice(interaction,'Nothing was selected.');
   if(kind==='page')return panelUpdate(interaction,client,room,value);
-  if(!canControl(interaction,room,client,kind))return interaction.reply({content:'Only the room owner can use that selection.',ephemeral:true});
+  if(!canControl(interaction,room,client,kind))return panelNotice(interaction,'Only the room owner can use that selection.');
   if(kind==='tts-provider'){room.tts.provider=value;return panelUpdate(interaction,client,room,'tts');}
   if(kind==='tts-voice'){
     const voices=await tts.listVoices().catch(()=>[]);
     const match=voices.find(v=>(v.ShortName||v.Name)===value);
-    if(!match)return interaction.reply({content:'That voice is no longer available. Refresh and try again.',ephemeral:true});
+    if(!match)return interaction.reply({content:'That voice is no longer available. Refresh and try again.',flags:MessageFlags.Ephemeral});
     room.tts.voice=value;room.tts.lang=match.Locale||room.tts.lang;
     return panelUpdate(interaction,client,room,'tts');
   }
   if(kind==='tts-language'){room.tts.lang=value;return panelUpdate(interaction,client,room,'tts');}
   if(kind==='member'||kind==='access-user'||kind==='access-role'){
     selections.set(selectionKey(interaction,kind),value);
-    return interaction.reply({content:kind==='member'?'Selected <@'+value+'>.':'Selected '+(kind==='access-role'?'<@&'+value+'>':'<@'+value+'>')+'.',ephemeral:true});
+    return panelNotice(interaction,kind==='member'?'Selected <@'+value+'>.':'Selected '+(kind==='access-role'?'<@&'+value+'>':'<@'+value+'>')+'.');
   }
-  return interaction.reply({content:'Unknown panel selection.',ephemeral:true});
+  return panelNotice(interaction,'Unknown panel selection.');
 }
 
 async function handleModal(interaction,client,rooms){
   const room=roomFromPanel(interaction.channelId,rooms);
-  if(!room||!canAccess(interaction,room))return interaction.reply({content:'You do not have access to this panel.',ephemeral:true});
+  if(!room||!canAccess(interaction,room))return panelNotice(interaction,'You do not have access to this panel.');
   const kind=interaction.customId.slice('rn-tvc-modal:'.length);
-  if(kind!=='delete'&&!canControl(interaction,room,client,kind))return interaction.reply({content:'Only the room owner can use that control.',ephemeral:true});
+  if(kind!=='delete'&&!canControl(interaction,room,client,kind))return panelNotice(interaction,'Only the room owner can use that control.');
   const value=interaction.fields.getTextInputValue('value').trim();
   const guild=interaction.guild;
   const voice=guild.channels.cache.get(room.voiceChannelId);
+  if(!(await interaction.deferReply({flags:MessageFlags.Ephemeral}).then(()=>true).catch(e=>{console.error('[TempVC/Panel] deferReply:',e?.message||e);return false;})))return;
   if(kind==='delete'){
-    if(value.toUpperCase()!=='DELETE')return interaction.reply({content:'Deletion cancelled. Type DELETE exactly to confirm.',ephemeral:true});
-    await interaction.reply({content:'Deleting the temporary room...',ephemeral:true});
+    if(value.toUpperCase()!=='DELETE')return interaction.editReply({content:'Deletion cancelled. Type DELETE exactly to confirm.'});
+    await interaction.editReply({content:'Deleting the temporary room...'});
     return deleteRoom(client,rooms,room,guild,'Temporary VC owner deleted the room');
   }
-  if(!voice)return interaction.reply({content:'The voice room no longer exists.',ephemeral:true});
+  if(!voice)return interaction.editReply({content:'The voice room no longer exists.'});
   try{
     if(kind==='rename'){
       const name=value.replace(/\s+/g,' ').slice(0,100);if(!name)throw new Error('Room name cannot be empty.');
@@ -735,19 +754,20 @@ async function handleModal(interaction,client,rooms){
       room.tts.voice=value;
     }else throw new Error('Unknown panel form.');
     room.page=kind==='speak'?'tts':'room';
-    await interaction.reply({content:'Updated.',ephemeral:true});
+    await interaction.editReply({content:'Updated.'});
     await refresh(client,room,room.page);
-  }catch(e){return interaction.reply({content:'Could not update: '+(e?.message||e),ephemeral:true});}
+  }catch(e){return interaction.editReply({content:'Could not update: '+(e?.message||e)}).catch(()=>{});}
 }
 
 async function handle(interaction,client,rooms){
   try{
-    if(interaction.isButton?.()&&interaction.customId.startsWith('rn-tvc:'))return handleButton(interaction,client,rooms);
-    if((interaction.isStringSelectMenu?.()||interaction.isUserSelectMenu?.()||interaction.isRoleSelectMenu?.())&&interaction.customId.startsWith('rn-tvc:'))return handleSelect(interaction,client,rooms);
-    if(interaction.isModalSubmit?.()&&interaction.customId.startsWith('rn-tvc-modal:'))return handleModal(interaction,client,rooms);
+    if(interaction.isButton?.()&&interaction.customId.startsWith('rn-tvc:'))return await handleButton(interaction,client,rooms);
+    if((interaction.isStringSelectMenu?.()||interaction.isUserSelectMenu?.()||interaction.isRoleSelectMenu?.())&&interaction.customId.startsWith('rn-tvc:'))return await handleSelect(interaction,client,rooms);
+    if(interaction.isModalSubmit?.()&&interaction.customId.startsWith('rn-tvc-modal:'))return await handleModal(interaction,client,rooms);
   }catch(e){
     console.error('[TempVC/Panel]',e?.stack||e);
-    if(!interaction.replied&&!interaction.deferred)await interaction.reply({content:'Panel action failed: '+(e?.message||e),ephemeral:true}).catch(()=>{});
+    if(interaction.deferred&&!interaction.replied)await interaction.editReply({content:'Panel action failed: '+(e?.message||e)}).catch(()=>{});
+    else if(!interaction.replied&&!interaction.deferred)await interaction.reply({content:'Panel action failed: '+(e?.message||e),flags:MessageFlags.Ephemeral}).catch(()=>{});
   }
 }
 
