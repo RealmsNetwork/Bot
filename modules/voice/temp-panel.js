@@ -554,6 +554,10 @@ async function getMember(interaction){
   return interaction.guild.members.cache.get(id)||await interaction.guild.members.fetch(id).catch(()=>null);
 }
 
+function targetIsInRoom(member, room) {
+  return member?.voice?.channelId === room.voiceChannelId;
+}
+
 async function panelUpdate(interaction,client,room,page){
   if(!interaction.deferred&&!interaction.replied)await interaction.deferUpdate().catch(e=>console.error('[TempVC/Panel] deferUpdate:',e?.message||e));
   const msg=await refresh(client,room,page);
@@ -624,6 +628,7 @@ async function handleButton(interaction,client,rooms){
   }
   else if(action==='kick'){
     if(!member||member.id===interaction.user.id)return panelNotice(interaction,'Select another member first.');
+    if(!targetIsInRoom(member,room))return panelNotice(interaction,'That member is not in this temporary voice room.');
     await member.voice.disconnect('Temporary VC kick');
   }
   else if(action==='ban'){
@@ -641,10 +646,12 @@ async function handleButton(interaction,client,rooms){
   }
   else if(action==='mute'||action==='unmute'){
     if(!member||member.id===interaction.user.id)return panelNotice(interaction,'Select another member first.');
+    if(!targetIsInRoom(member,room))return panelNotice(interaction,'That member is not in this temporary voice room.');
     await member.voice.setMute(action==='mute','Temporary VC moderation');
   }
   else if(action==='deafen'||action==='undeafen'){
     if(!member||member.id===interaction.user.id)return panelNotice(interaction,'Select another member first.');
+    if(!targetIsInRoom(member,room))return panelNotice(interaction,'That member is not in this temporary voice room.');
     await member.voice.setDeaf(action==='deafen','Temporary VC moderation');
   }
   else if(action==='transfer-selected'){
