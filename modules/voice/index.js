@@ -67,7 +67,7 @@ async function createTempRoom(member,client){
   let room=null;
   try{
     channel=await guild.channels.create(options);
-    room={guildId:guild.id,voiceChannelId:channel.id,panelChannelId:null,panelMessageId:null,ownerId:member.id,createdAt:Date.now(),locked:!!c.defaultLocked,hidden:!!c.defaultHidden,accessUsers:new Set([member.id]),accessRoles:new Set(),controlUsers:new Set([member.id]),controlRoles:new Set([member.id]),bannedUsers:new Set(),tts:{},page:'overview',emptySince:null,recoveryGraceUntil:0};
+    room={guildId:guild.id,voiceChannelId:channel.id,panelChannelId:null,panelMessageId:null,ownerId:member.id,createdAt:Date.now(),locked:!!c.defaultLocked,hidden:!!c.defaultHidden,accessUsers:new Set([member.id]),accessRoles:new Set(),controlUsers:new Set([member.id]),controlRoles:new Set(),bannedUsers:new Set(),tts:{},page:'overview',emptySince:null,recoveryGraceUntil:0};
     tempRooms.set(channel.id,room);
     await channel.permissionOverwrites.edit(member.id,{Connect:true,Speak:true,ViewChannel:true});
     await tempPanel.create(client,member,channel,room);
