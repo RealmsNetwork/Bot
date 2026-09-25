@@ -69,6 +69,7 @@ temporaryVoice:
   allowOwnerPanel: true
   allowOwnerBan: true
   autoTransferOnOwnerLeave: true
+  ownerLeaveGraceSeconds: 300
   panelAllowTtsControl: true
   panelAllowUserAccess: true
   panelAllowRoleAccess: true
