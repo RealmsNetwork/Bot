@@ -654,15 +654,7 @@ async function panelUpdate(interaction,client,room,page){
   }
   const msg=await refresh(client,room,page);
   if(!msg)return interaction.editReply({content:'The temporary VC panel is no longer available.',embeds:[],components:[]}).catch(e=>console.error('[TempVC/Panel] editReply:',e?.message||e));
-  const payload={
-    content:msg.content || undefined,
-    embeds:(msg.embeds||[]).map(x=>typeof x.toJSON==='function'?x.toJSON():x),
-    components:(msg.components||[]).map(x=>typeof x.toJSON==='function'?x.toJSON():x)
-  };
-  if(interaction.deferred||interaction.replied)return interaction.editReply(payload).catch(e=>console.error('[TempVC/Panel] editReply:',e?.message||e));
-  return interaction.update(payload).catch(async e=>{
-    console.error('[TempVC/Panel] Interaction update failed:',e?.message||e);
-  });
+  return msg;
 }
 
 async function handleButton(interaction,client,rooms){
