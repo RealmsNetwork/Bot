@@ -511,6 +511,8 @@ async function speak(client, room, text, member, overrides = {}) {
   if (overrides.lang !== undefined) settings.lang = String(overrides.lang);
   if (overrides.voice !== undefined) settings.voice = String(overrides.voice);
   if (!SUPPORTED_PROVIDERS.has(settings.provider)) throw new Error('Unsupported TTS provider: ' + settings.provider);
+  if (overrides.lang === undefined && settings.provider === 'google') settings.lang = 'en';
+  if (overrides.voice === undefined && settings.provider === 'polly') settings.voice = 'Brian';
   if (settings.enabled === false) throw new Error('TTS is disabled for this room.');
   let phrase = String(text || '').replace(/\s+/g, ' ').trim();
   if (!phrase) throw new Error('TTS text cannot be empty.');
