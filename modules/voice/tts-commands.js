@@ -60,9 +60,11 @@ function runtimeRoom(i){
 
 async function speak(i,provider,text,extra={}){
   if(!i.deferred&&!i.replied)await i.deferReply({flags:MessageFlags.Ephemeral});
+  const publicAudio = i.client.modules.get('voice')?.config?.tts?.allowPublicAudio !== false;
+  const realRoom = roomFor(i);
+  if(!realRoom && !publicAudio)return i.editReply({content:'Public TTS is disabled for this voice channel.'});
   const room=runtimeRoom(i);
   if(!room)return i.editReply({content:'Join a voice channel first.'});
-  const publicAudio = i.client.modules.get('voice')?.config?.tts?.allowPublicAudio !== false;
   if(!publicAudio && !canControlTts(i,room))return i.editReply({content:'Public TTS is disabled for this room.'});
   const canCustomizeVoice=voiceSelectionEnabled(i)&&controlConfigEnabled(i);
   if((extra.lang!==undefined||extra.voice!==undefined)&&!canCustomizeVoice)
