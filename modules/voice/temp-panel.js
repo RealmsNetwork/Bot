@@ -620,8 +620,8 @@ async function revoke(room,guild,id,type,client){
   normalizeRoom(room,client);
   if(id===room.ownerId)throw new Error('The owner cannot be removed from panel access.');
   if(type==='role')room.accessRoles.delete(id);else room.accessUsers.delete(id);
-  await guild.channels.cache.get(room.panelChannelId)?.permissionOverwrites.delete(id).catch(()=>{});
-  if(room.syncPermissions!==false)await guild.channels.cache.get(room.voiceChannelId)?.permissionOverwrites.delete(id).catch(()=>{});
+  await guild.channels.cache.get(room.panelChannelId)?.permissionOverwrites.edit(id,{ViewChannel:null,ReadMessageHistory:null,SendMessages:null}).catch(()=>{});
+  if(room.syncPermissions!==false)await guild.channels.cache.get(room.voiceChannelId)?.permissionOverwrites.edit(id,{ViewChannel:null,Connect:null,Speak:null}).catch(()=>{});
 }
 
 async function showForm(interaction,kind){
@@ -732,7 +732,7 @@ async function handleButton(interaction,client,rooms){
   else if(action==='unban'){
     if(!member)return panelNotice(interaction,'Select a member first.');
     room.bannedUsers.delete(member.id);
-    await voice.permissionOverwrites.delete(member.id).catch(()=>{});
+    await voice.permissionOverwrites.edit(member.id,{ViewChannel:null,Connect:null}).catch(()=>{});
   }
   else if(action==='mute'||action==='unmute'){
     if(!member||member.id===interaction.user.id)return panelNotice(interaction,'Select another member first.');
@@ -765,10 +765,14 @@ async function handleButton(interaction,client,rooms){
   else if(action==='grant-role'){const id=selected(interaction,'access-role');if(!id)return panelNotice(interaction,'Select a role first.');await grant(room,guild,id,'role',client);}
   else if(action==='revoke-role'){const id=selected(interaction,'access-role');if(!id)return panelNotice(interaction,'Select a role first.');await revoke(room,guild,id,'role',client);}
   else if(action==='reset-access'){
+    const managedIds=new Set([...room.accessUsers,...room.accessRoles,...room.bannedUsers]);
     room.accessUsers=new Set([room.ownerId]);room.accessRoles=new Set();room.bannedUsers=new Set();
-    for(const id of [...voice.permissionOverwrites.cache.keys()])if(id!==guild.roles.everyone.id&&id!==guild.members.me?.id&&id!==room.ownerId)await voice.permissionOverwrites.delete(id).catch(()=>{});
     const panel=guild.channels.cache.get(room.panelChannelId);
-    for(const id of [...(panel?.permissionOverwrites?.cache?.keys()||[])])if(id!==guild.roles.everyone.id&&id!==guild.members.me?.id&&id!==room.ownerId)await panel.permissionOverwrites.delete(id).catch(()=>{});
+    for(const id of managedIds){
+      if(id===room.ownerId)continue;
+      await panel?.permissionOverwrites.edit(id,{ViewChannel:null,ReadMessageHistory:null,SendMessages:null}).catch(()=>{});
+      await voice.permissionOverwrites.edit(id,{ViewChannel:null,Connect:null,Speak:null}).catch(()=>{});
+    }
   }
   else if(action==='sync-perms')await syncPermissions(room,guild,client);
   else if(action==='toggle-sync')room.syncPermissions=room.syncPermissions===false;
