@@ -351,10 +351,11 @@ async function playNext(room,client) {
     if (file) setTimeout(() => fs.rm(file, { force: true }, () => {}), 120000);
   } catch (e) {
     console.error('[TempVC/TTS] Synthesis:', e?.stack || e?.message || e);
-    room.ttsQueue.shift();
+    const stillCurrent = room.ttsQueue?.[0] === item && generation === (room.ttsGeneration || 0);
+    if (stillCurrent) room.ttsQueue.shift();
     room.ttsPlaying = false;
     if (file) await fs.promises.rm(file, { force: true }).catch(() => {});
-    await playNext(room,client);
+    if (stillCurrent) await playNext(room,client);
     return;
   }
   room.ttsQueue.shift();
