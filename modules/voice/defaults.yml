@@ -5,3 +5,6 @@ temporaryVoice:
   panelAllowUserAccess: true
   panelAllowRoleAccess: true
   allowOwnerTts: true
+  allowOwnerBan: true
+  panelAllowTtsControl: true
+  autoTransferOnOwnerLeave: true
