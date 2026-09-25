@@ -522,11 +522,21 @@ async function refresh(client, room, page = room.page || 'overview') {
       const msg=await panel.messages.fetch(room.panelMessageId);
       await msg.edit(p);
       return msg;
-    }catch{}
+    }catch(e){
+      if(e?.code !== 10008){
+        console.error('[TempVC/Panel] Failed to edit panel:',e?.message||e);
+        return null;
+      }
+    }
   }
-  const msg=await panel.send(p);
-  room.panelMessageId=msg.id;
-  return msg;
+  try{
+    const msg=await panel.send(p);
+    room.panelMessageId=msg.id;
+    return msg;
+  }catch(e){
+    console.error('[TempVC/Panel] Failed to send panel:',e?.message||e);
+    return null;
+  }
 }
 
 function panelOverwrites(guild,ownerId){
@@ -914,6 +924,9 @@ async function channelUpdate(oldChannel,newChannel,client,rooms){
   try{
     normalizeRoom(room,client);
     const guild=newChannel.guild;
+    const everyoneOverwrite=newChannel.permissionOverwrites.cache.get(guild.roles.everyone.id);
+    room.locked=!!everyoneOverwrite?.deny.has(PermissionFlagsBits.Connect);
+    room.hidden=!!everyoneOverwrite?.deny.has(PermissionFlagsBits.ViewChannel);
     if(room.panelChannelId){
       const panel=guild.channels.cache.get(room.panelChannelId);
       if(panel){
