@@ -298,6 +298,7 @@ function ensurePlayer(room,client) {
   room.ttsPlayer.on(AudioPlayerStatus.Idle, () => {
     const file = room.ttsCurrentFile;
     room.ttsCurrentFile = null;
+    room.ttsCurrentItem = null;
     if (file) fs.promises.rm(file, { force: true }).catch(e => console.error('[TempVC/TTS] Audio cleanup:', e?.message || e));
     room.ttsPlaying = false;
     pump(room,client).catch(e => console.error('[TempVC/TTS]', e?.stack || e));
@@ -305,6 +306,7 @@ function ensurePlayer(room,client) {
   room.ttsPlayer.on('error', e => {
     const file = room.ttsCurrentFile;
     room.ttsCurrentFile = null;
+    room.ttsCurrentItem = null;
     if (file) fs.promises.rm(file, { force: true }).catch(err => console.error('[TempVC/TTS] Audio cleanup:', err?.message || err));
     console.error('[TempVC/TTS] Player:', e?.stack || e?.message || e);
     room.ttsPlaying = false;
@@ -457,19 +459,21 @@ async function playNext(room,client) {
     }
     pauseMusicForTts(client, room);
     room.ttsConnection.subscribe(room.ttsPlayer);
+    room.ttsQueue.shift();
     room.ttsPlaying = true;
+    room.ttsCurrentItem = item;
     room.ttsCurrentFile = file;
     room.ttsPlayer.play(resource);
   } catch (e) {
     console.error('[TempVC/TTS] Synthesis:', e?.stack || e?.message || e);
-    const stillCurrent = room.ttsQueue?.[0] === item && generation === (room.ttsGeneration || 0);
-    if (stillCurrent) room.ttsQueue.shift();
+    const stillQueued = room.ttsQueue?.[0] === item && generation === (room.ttsGeneration || 0);
+    if (stillQueued) room.ttsQueue.shift();
+    if (room.ttsCurrentItem === item) room.ttsCurrentItem = null;
     room.ttsPlaying = false;
     if (file) await fs.promises.rm(file, { force: true }).catch(() => {});
     if (room.ttsCurrentFile === file) room.ttsCurrentFile = null;
     return;
   }
-  room.ttsQueue.shift();
 }
 
 async function pump(room, client) {
@@ -554,6 +558,7 @@ async function stop(room,client) {
   room.ttsCooldowns?.clear?.();
   room.ttsQueue = [];
   room.ttsPlaying = false;
+  room.ttsCurrentItem = null;
   const currentFile = room.ttsCurrentFile;
   room.ttsCurrentFile = null;
   room.ttsPlayer?.stop(true);
