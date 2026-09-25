@@ -239,14 +239,22 @@ async function synthesizeEdge(text, file, settings = {}) {
     timeout: timeoutMs
   });
   let timer;
+  let timedOut = false;
+  const pending = tts.ttsPromise(String(text), file);
+  pending.finally(() => {
+    if (timedOut) fs.promises.rm(file, { force: true }).catch(() => {});
+  }).catch(() => {});
   try {
     await Promise.race([
-      tts.ttsPromise(String(text), file),
+      pending,
       new Promise((_, reject) => {
         timer = setTimeout(() => reject(new Error('Edge TTS request timed out.')), timeoutMs);
         timer.unref?.();
       })
     ]);
+  } catch (e) {
+    if (e?.message === 'Edge TTS request timed out.') timedOut = true;
+    throw e;
   } finally {
     clearTimeout(timer);
   }
