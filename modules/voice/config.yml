@@ -59,6 +59,14 @@ temporaryVoice:
   allowOwnerUnhide: true
   allowOwnerClaim: true
   allowOwnerPanel: true
+  allowOwnerBan: true
+  autoTransferOnOwnerLeave: true
+  panelAllowTtsControl: true
+  panelAllowUserAccess: true
+  panelAllowRoleAccess: true
+  panelEnabled: true
+  panelSuffix: "-panel"
+  panelAutoPin: true
   panelEphemeral: true
   panelTimeoutSeconds: 300
   defaultLocked: false
