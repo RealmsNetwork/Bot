@@ -303,9 +303,17 @@ async function ensureConnection(client, room) {
     const channel = guild?.channels.cache.get(room.voiceChannelId);
     if (!guild || !channel) throw new Error('Temporary voice room no longer exists.');
 
-    let connection = client.voiceSessions?.get(guild.id)?.connection || room.ttsConnection;
+    const session = client.voiceSessions?.get(guild.id);
+    let connection = room.ttsConnection || session?.connection;
     if (connection?.joinConfig?.channelId !== channel.id) {
+      if (session && (session.current || session.queue?.length)) {
+        session.queue = [];
+        session.current = null;
+        session.player?.stop(true);
+        console.warn('[TempVC/TTS] Stopping music session because the bot is moving into the TTS room.');
+      }
       connection?.destroy?.();
+      if (session?.connection === connection) session.connection = null;
       connection = null;
     }
 
@@ -350,7 +358,6 @@ async function ensureConnection(client, room) {
         connection.destroy();
         throw e;
       }
-      const session = client.voiceSessions?.get(guild.id);
       if (session) session.connection = connection;
     }
 
@@ -506,11 +513,16 @@ async function speak(client, room, text, member, overrides = {}) {
     }
   }
 
+  const generation = room.ttsGeneration || 0;
   try {
     await ensureConnection(client, room);
   } catch (e) {
     if (cooldownUserId && room.ttsCooldowns?.get(cooldownUserId) === cooldownSetAt) room.ttsCooldowns.delete(cooldownUserId);
     throw e;
+  }
+  if (generation !== (room.ttsGeneration || 0)) {
+    if (cooldownUserId && room.ttsCooldowns?.get(cooldownUserId) === cooldownSetAt) room.ttsCooldowns.delete(cooldownUserId);
+    throw new Error('TTS request was cancelled.');
   }
   ensurePlayer(room,client);
   room.ttsQueue.push({ text: phrase, settings, requestedAt: Date.now(), requestHash: shortHash(sha256(JSON.stringify({ phrase, settings }))) });
