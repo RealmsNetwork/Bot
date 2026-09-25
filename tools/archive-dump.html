@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>RealmsNetwork Archive Dump</title>
+<style>
+body{font-family:system-ui,sans-serif;max-width:1000px;margin:40px auto;padding:0 18px;background:#09070d;color:#eee}
+h1{color:#d946ef}.box{background:#0f0b14;border:1px solid #2b2035;border-radius:12px;padding:18px;margin:16px 0}
+button{background:#8b5cf6;color:white;border:0;border-radius:8px;padding:10px 14px;cursor:pointer;margin-right:8px}
+button:disabled{opacity:.5;cursor:not-allowed}
+textarea{width:100%;min-height:520px;background:#050407;color:#ddd;border:1px solid #302439;border-radius:8px;padding:12px;box-sizing:border-box;font:12px ui-monospace,SFMono-Regular,Consolas,monospace}
+small{color:#aaa}.ok{color:#9ae6b4}.err{color:#fc8181}
+</style>
+</head>
+<body>
+<h1>RealmsNetwork Archive Dump</h1>
+<div class="box">
+  <p>Select the <code>.tar.gz</code> / <code>.tgz</code> archive. Everything happens locally in your browser.</p>
+  <input id="file" type="file" accept=".tar.gz,.tgz,application/gzip">
+  <p id="status"><small>Waiting for archive...</small></p>
+</div>
+<div class="box">
+  <button id="copy" disabled>Copy Dump</button>
+  <button id="save" disabled>Save Dump</button>
+  <textarea id="out" readonly placeholder="The generated archive dump will appear here."></textarea>
+</div>
+<script>
+const $=id=>document.getElementById(id);
+const out=$('out'),status=$('status'),copy=$('copy'),save=$('save');
+const MAX_TEXT=8*1024*1024;
+function u8ToString(bytes){return new TextDecoder('utf-8',{fatal:false}).decode(bytes);}
+function cleanName(name){return name.replace(/\0/g,'').replace(/^\\.\\//,'');}
+function parseOct(bytes,start,len){const raw=new TextDecoder().decode(bytes.slice(start,start+len)).replace(/\0/g,'').trim();return raw?parseInt(raw,8)||0:0;}
+function isText(bytes){
+  const sample=bytes.slice(0,Math.min(bytes.length,65536));
+  for(const b of sample)if(b===0)return false;
+  return true;
+}
+function parseTar(bytes){
+  const files=[];
+  for(let off=0;off+512<=bytes.length;){
+    const header=bytes.slice(off,off+512);
+    const empty=header.every(b=>b===0);
+    if(empty)break;
+    const name=cleanName(u8ToString(header.slice(0,100)));
+    const prefix=cleanName(u8ToString(header.slice(345,500)));
+    const full=(prefix?prefix+'/':'')+name;
+    const size=parseOct(header,124,12);
+    const type=String.fromCharCode(header[156]||48);
+    off+=512;
+    const data=bytes.slice(off,off+size);
+    off+=Math.ceil(size/512)*512;
+    if(full&&!full.endsWith('/')&&type!=='5')files.push({path:full,size,data});
+  }
+  return files;
+}
+async function gunzip(file){
+  if(!('DecompressionStream' in window))throw new Error('This browser does not support DecompressionStream. Use current Firefox, Chrome, Edge, or Safari.');
+  const stream=file.stream().pipeThrough(new DecompressionStream('gzip'));
+  return new Uint8Array(await new Response(stream).arrayBuffer());
+}
+function buildDump(files){
+  const text=[], skipped=[];
+  for(const f of files){
+    if(f.size>MAX_TEXT){skipped.push(f);continue;}
+    if(!isText(f.data)){skipped.push(f);continue;}
+    text.push('FILE: '+f.path);
+    text.push('SIZE: '+f.size+' bytes');
+    text.push('--- BEGIN FILE ---');
+    text.push(u8ToString(f.data).replace(/\r\n/g,'\n'));
+    text.push('--- END FILE ---');
+    text.push('');
+  }
+  const lines=[
+    'ARCHIVE DUMP',
+    'Generated locally in browser',
+    'Files in archive: '+files.length,
+    'Included text files: '+text.filter(x=>x.startsWith('FILE: ')).length,
+    'Skipped by filter: '+skipped.length,
+    'Binary files: '+skipped.filter(x=>!isText(x.data)).length,
+    'Oversized files: '+skipped.filter(x=>x.size>MAX_TEXT).length,
+    '========================================',
+    '',
+    ...text,
+    'SKIPPED FILES',
+    ...skipped.map(f=>f.path+' | '+f.size+' bytes')
+  ];
+  return lines.join('\n').replace(/\n{3,}/g,'\n\n');
+}
+$('file').addEventListener('change',async()=>{
+  const file=$('file').files[0];
+  if(!file)return;
+  try{
+    status.innerHTML='<small>Reading '+file.name+'...</small>';
+    const tar=await gunzip(file);
+    status.innerHTML='<small>Parsing TAR...</small>';
+    const files=parseTar(tar);
+    const dump=buildDump(files);
+    out.value=dump;
+    copy.disabled=false;save.disabled=false;
+    status.innerHTML='<small class="ok">Done: '+files.length+' archive entries processed. Nothing was uploaded anywhere.</small>';
+  }catch(e){
+    out.value='';
+    copy.disabled=true;save.disabled=true;
+    status.innerHTML='<small class="err">'+e.message+'</small>';
+  }
+});
+copy.addEventListener('click',async()=>{
+  await navigator.clipboard.writeText(out.value);
+  status.innerHTML='<small class="ok">Copied. Paste the entire dump here.</small>';
+});
+save.addEventListener('click',()=>{
+  const blob=new Blob([out.value],{type:'text/plain;charset=utf-8'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download='archive-dump.txt';
+  a.click();
+  URL.revokeObjectURL(a.href);
+});
+</script>
+</body>
+</html>
