@@ -22,6 +22,49 @@ const MAX_SELECTIONS = 5000;
 
 function cfg(client) { return client.modules.get('voice')?.config || {}; }
 function tc(client) { return cfg(client).temporaryVoice || {}; }
+function stateKey(room) { return 'tempvc:' + room.voiceChannelId; }
+
+function roomSnapshot(room) {
+  return {
+    version: 1,
+    ownerId: room.ownerId,
+    accessUsers: [...(room.accessUsers || [])],
+    accessRoles: [...(room.accessRoles || [])],
+    bannedUsers: [...(room.bannedUsers || [])],
+    locked: !!room.locked,
+    hidden: !!room.hidden,
+    operatorControls: room.operatorControls !== false,
+    syncPermissions: room.syncPermissions !== false,
+    tts: {
+      provider: room.tts?.provider,
+      voice: room.tts?.voice,
+      lang: room.tts?.lang,
+      rate: room.tts?.rate,
+      volume: room.tts?.volume,
+      enabled: room.tts?.enabled,
+      autoTts: room.tts?.autoTts,
+      prefixName: room.tts?.prefixName
+    }
+  };
+}
+
+async function persistRoom(client, room) {
+  if (!client?.db?.set || !room?.guildId || !room?.voiceChannelId) return;
+  const snapshot = roomSnapshot(room);
+  const serialized = JSON.stringify(snapshot);
+  if (room._persistedSnapshot === serialized) return;
+  try {
+    await client.db.set(room.guildId, stateKey(room), snapshot);
+    room._persistedSnapshot = serialized;
+  } catch (e) {
+    console.error('[TempVC] Failed to persist room state:', e?.message || e);
+  }
+}
+
+async function deletePersistedRoom(client, room) {
+  if (!client?.db?.delete || !room?.guildId || !room?.voiceChannelId) return;
+  await client.db.delete(room.guildId, stateKey(room)).catch(e => console.error('[TempVC] Failed to delete room state:', e?.message || e));
+}
 
 function brand(client) {
   const b = client.config.branding || {};
@@ -503,6 +546,7 @@ function buildPayload(client, room, extras = {}) {
 
 async function refresh(client, room, page = room.page || 'overview') {
   normalizeRoom(room,client);
+  await persistRoom(client,room);
   room.page=page;
   const guild=client.guilds.cache.get(room.guildId);
   const panel=guild?.channels.cache.get(room.panelChannelId);
@@ -575,6 +619,7 @@ async function deleteRoom(client,rooms,room,guild,reason='Temporary voice room d
   if(!room)return;
   rooms.delete(room.voiceChannelId);
   await tts.stop(room,client);
+  await deletePersistedRoom(client,room);
   room.ttsConnection?.destroy?.();
   const panel=room.panelChannelId&&guild.channels.cache.get(room.panelChannelId);
   const voice=guild.channels.cache.get(room.voiceChannelId);
