@@ -53,7 +53,7 @@ function normalizeRoom(room, client) {
   room.accessUsers.add(room.ownerId);
   room.page = room.page || 'overview';
   room.tts = tts.settingsFor(room, client);
-  if (room.operatorControls === undefined) room.operatorControls = tc(client).panelAccessCanControl !== false;
+  if (room.operatorControls === undefined) room.operatorControls = tc(client).ownerOnlyControl !== true && tc(client).panelAccessCanControl !== false;
   if (room.syncPermissions === undefined) room.syncPermissions = tc(client).syncPermissions !== false;
   room.ttsBrowser = room.ttsBrowser || { kind: null, page: 0 };
   return room;
@@ -886,7 +886,7 @@ async function recover(client,rooms){
         ownerId:owner,createdAt:channel.createdTimestamp||Date.now(),
         locked:!!voice.permissionOverwrites.cache.get(guild.roles.everyone.id)?.deny.has(PermissionFlagsBits.Connect),
         hidden:!!voice.permissionOverwrites.cache.get(guild.roles.everyone.id)?.deny.has(PermissionFlagsBits.ViewChannel),
-        accessUsers:new Set([owner]),accessRoles:new Set(),bannedUsers:new Set(),page:'overview',operatorControls:tc(client).panelAccessCanControl !== false,syncPermissions:tc(client).syncPermissions !== false,ttsBrowser:{kind:null,page:0}
+        accessUsers:new Set([owner]),accessRoles:new Set(),bannedUsers:new Set(),page:'overview',operatorControls:tc(client).ownerOnlyControl !== true && tc(client).panelAccessCanControl !== false,syncPermissions:tc(client).syncPermissions !== false,ttsBrowser:{kind:null,page:0}
       };
       for(const [id,ow] of channel.permissionOverwrites.cache){
         if(id===guild.roles.everyone.id||id===guild.members.me?.id)continue;
