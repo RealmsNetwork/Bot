@@ -33,7 +33,7 @@ function brand(client) {
 }
 
 function panelSlug(client, name) {
-  const suffix = String(tc(client).panelSuffix || '-panel');
+  const suffix = String(tc(client).panelSuffix || '-panel').slice(0, 99);
   const raw = String(name || 'room')
     .toLowerCase()
     .normalize('NFKD')
@@ -41,7 +41,8 @@ function panelSlug(client, name) {
     .trim()
     .replace(/\s+/g, '-')
     .replace(/-+/g, '-');
-  const base = (raw || 'room').slice(0, Math.max(1, 100 - suffix.length));
+  const maxBaseLength = Math.max(1, 100 - suffix.length);
+  const base = (raw || 'room').slice(0, maxBaseLength);
   return base + suffix;
 }
 
