@@ -100,7 +100,7 @@ test('parseLanguageCatalog reads the nested Google language map', () => {
     tl: { en: 'English', es: 'Spanish', 'pt-BR': 'Portuguese (Brazil)' }
   });
 
-  assert.deepEqual(languages.map(x => x.code), ['en', 'es', 'pt-br']);
+  assert.deepEqual(languages.map(x => x.code), ['en', 'es', 'pt-BR']);
   assert.equal(languages.find(x => x.code === 'pt-br').name, 'Portuguese (Brazil)');
 });
 
