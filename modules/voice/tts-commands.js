@@ -1,17 +1,38 @@
 const {SlashCommandBuilder,EmbedBuilder,ActionRowBuilder,ButtonBuilder,ButtonStyle,StringSelectMenuBuilder,MessageFlags}=require('discord.js');
 const tts=require('./tts-service');
 
+const TTS_ROOM_TTL_MS = 30 * 60 * 1000;
+const MAX_TTS_ROOMS = 1000;
+
+function pruneRuntimeRooms(map, now = Date.now()) {
+  if (!map?.size) return;
+  for (const [id, room] of map) {
+    if (now - Number(room.lastUsedAt || 0) > TTS_ROOM_TTL_MS) map.delete(id);
+  }
+  while (map.size > MAX_TTS_ROOMS) {
+    const oldest = map.keys().next().value;
+    if (oldest === undefined) break;
+    map.delete(oldest);
+  }
+}
+
 function roomFor(i){
   return i.client.voiceRooms?.get(i.member?.voice?.channelId)||null;
 }
 
 function runtimeRoom(i){
   const existing=roomFor(i);
-  if(existing)return existing;
+  if(existing) {
+    existing.lastUsedAt=Date.now();
+    return existing;
+  }
   const id=i.member?.voice?.channelId;
   if(!id)return null;
+  const now=Date.now();
   i.client.voiceTtsRooms=i.client.voiceTtsRooms||new Map();
-  if(!i.client.voiceTtsRooms.has(id))i.client.voiceTtsRooms.set(id,{guildId:i.guildId,voiceChannelId:id,ownerId:i.user.id,accessUsers:new Set([i.user.id]),accessRoles:new Set(),bannedUsers:new Set(),ttsBrowser:{kind:null,page:0}});
+  pruneRuntimeRooms(i.client.voiceTtsRooms,now);
+  if(!i.client.voiceTtsRooms.has(id))i.client.voiceTtsRooms.set(id,{guildId:i.guildId,voiceChannelId:id,ownerId:i.user.id,accessUsers:new Set([i.user.id]),accessRoles:new Set(),bannedUsers:new Set(),ttsBrowser:{kind:null,page:0},lastUsedAt:now});
+  else i.client.voiceTtsRooms.get(id).lastUsedAt=now;
   return i.client.voiceTtsRooms.get(id);
 }
 
