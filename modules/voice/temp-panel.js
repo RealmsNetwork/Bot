@@ -203,8 +203,9 @@ function canAccess(interaction, room) {
 }
 
 function canControlTts(interaction, room, client) {
+  if (!interaction?.user?.id || !room) return false;
   normalizeRoom(room, client);
-  if (!room || room.bannedUsers.has(interaction.user.id)) return false;
+  if (room.bannedUsers.has(interaction.user.id)) return false;
   const c = tc(client);
   if (c.allowOwnerTts === false) return false;
   if (c.ownerOnlyControl === true || room.operatorControls === false) return interaction.user.id === room.ownerId;
@@ -728,6 +729,11 @@ async function syncPermissions(room,guild,client){
     const panel=guild.channels.cache.get(room.panelChannelId);
     if(!voice||!panel)throw new Error('Temporary VC permission targets no longer exist.');
     for(let attempt=1;attempt<=3;attempt++){
+      const before=JSON.stringify({
+        accessUsers:[...room.accessUsers].sort(),
+        accessRoles:[...room.accessRoles].sort(),
+        bannedUsers:[...room.bannedUsers].sort()
+      });
       try{
         for(const id of room.accessUsers){
           if(room.bannedUsers.has(id))continue;
@@ -740,6 +746,17 @@ async function syncPermissions(room,guild,client){
         }
         for(const id of room.bannedUsers){
           await voice.permissionOverwrites.edit(id,{ViewChannel:false,Connect:false});
+        }
+        const after=JSON.stringify({
+          accessUsers:[...room.accessUsers].sort(),
+          accessRoles:[...room.accessRoles].sort(),
+          bannedUsers:[...room.bannedUsers].sort()
+        });
+        if(after!==before){
+          room.permissionsDirty=true;
+          if(attempt===3)throw new Error('Temporary VC permissions changed while synchronization was in progress.');
+          await sleep(50);
+          continue;
         }
         room.permissionsDirty=false;
         return true;
@@ -981,7 +998,17 @@ async function handleButton(interaction,client,rooms){
   else if(action==='sync-perms')await syncPermissions(room,guild,client);
   else if(action==='toggle-sync')room.syncPermissions=room.syncPermissions===false;
   else if(action==='toggle-operators')room.operatorControls=room.operatorControls===false;
-  else if(action==='rebuild'){room.panelMessageId=null;return panelUpdate(interaction,client,room,room.page);}
+  else if(action==='rebuild'){
+    const panel=guild.channels.cache.get(room.panelChannelId);
+    if(room.panelMessageId){
+      const oldMessageId=room.panelMessageId;
+      room.panelMessageId=null;
+      await panel?.messages.delete(oldMessageId).catch(e=>{
+        if(e?.code!==10008)console.error('[TempVC/Panel] Failed to delete old panel message:',e?.message||e);
+      });
+    }
+    return panelUpdate(interaction,client,room,room.page);
+  }
   else if(action==='disconnect-bot'){
     await tts.stop(room,client);
     const session=client.voiceSessions?.get(guild.id);
