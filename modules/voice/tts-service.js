@@ -314,8 +314,11 @@ function ensurePlayer(room,client) {
 }
 
 async function ensureConnection(client, room) {
-  if (room.ttsConnectionPromise) return room.ttsConnectionPromise;
-  room.ttsConnectionPromise = (async () => {
+  const existingSession = client.voiceSessions?.get(room.guildId);
+  const existingPromise = existingSession?.connectionPromise || room.ttsConnectionPromise;
+  if (existingPromise) return existingPromise;
+
+  const work = (async () => {
     const guild = client.guilds.cache.get(room.guildId);
     const channel = guild?.channels.cache.get(room.voiceChannelId);
     if (!guild || !channel) throw new Error('Temporary voice room no longer exists.');
@@ -323,6 +326,8 @@ async function ensureConnection(client, room) {
     const session = client.voiceSessions?.get(guild.id);
     let connection = room.ttsConnection || session?.connection;
     if (connection?.joinConfig?.channelId !== channel.id) {
+      const previousTtsRoom = [...(client.voiceRooms?.values?.() || [])].find(candidate => candidate !== room && candidate.ttsConnection === connection);
+      if (previousTtsRoom) await stop(previousTtsRoom, client).catch(e => console.error('[TempVC/TTS] Failed to stop previous TTS room:', e?.message || e));
       if (session && (session.current || session.queue?.length)) {
         session.queue = [];
         session.current = null;
@@ -382,10 +387,13 @@ async function ensureConnection(client, room) {
     return connection;
   })();
 
+  if (existingSession) existingSession.connectionPromise = work;
+  else room.ttsConnectionPromise = work;
   try {
-    return await room.ttsConnectionPromise;
+    return await work;
   } finally {
-    room.ttsConnectionPromise = null;
+    if (existingSession?.connectionPromise === work) existingSession.connectionPromise = null;
+    if (!existingSession && room.ttsConnectionPromise === work) room.ttsConnectionPromise = null;
   }
 }
 
