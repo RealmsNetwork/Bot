@@ -198,6 +198,16 @@ function languageList(voices) {
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
+function parseLanguageCatalog(data) {
+  const source = data?.tl && typeof data.tl === 'object' ? data.tl :
+    data?.languages && typeof data.languages === 'object' ? data.languages :
+    data;
+  return Object.entries(source || {})
+    .map(([code, name]) => ({ code: String(code), name: String(name) }))
+    .filter(x => /^[a-z-]+$/i.test(x.code) && x.name && x.name !== '[object Object]')
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
 async function listLanguages(force = false) {
   if (!force && languageCache.values.length && Date.now() - languageCache.at < 21600000) return languageCache.values;
   if (languageFetchPromise) return languageFetchPromise;
@@ -206,13 +216,7 @@ async function listLanguages(force = false) {
       if (!response.ok) throw new Error('Google language API HTTP ' + response.status);
       return readResponseBuffer(response, MAX_JSON_BYTES);
     })).toString('utf8'));
-    const source = data?.tl && typeof data.tl === 'object' ? data.tl :
-      data?.languages && typeof data.languages === 'object' ? data.languages :
-      data;
-    languageCache.values = Object.entries(source || {})
-      .map(([code, name]) => ({ code: String(code), name: String(name) }))
-      .filter(x => /^[a-z-]+$/i.test(x.code) && x.name && x.name !== '[object Object]')
-      .sort((a, b) => a.name.localeCompare(b.name));
+    languageCache.values = parseLanguageCatalog(data);
     languageCache.at = Date.now();
     return languageCache.values;
   })();
@@ -584,6 +588,7 @@ async function stop(room,client) {
 module.exports = {
   listVoices,
   listLanguages,
+  parseLanguageCatalog,
   languageList,
   synthesize: synthesizeEdge,
   settingsFor,
