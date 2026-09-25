@@ -216,10 +216,10 @@ function actionEnabled(client, action) {
     ['rate-down', ttsDisabled],
     ['rate-up', ttsDisabled],
     ['tts-voices', voiceSelectionDisabled],
-    ['tts-languages', ttsDisabled],
+    ['tts-languages', voiceSelectionDisabled],
     ['tts-voice-manual', voiceSelectionDisabled],
     ['tts-provider', ttsDisabled],
-    ['tts-language', ttsDisabled],
+    ['tts-language', voiceSelectionDisabled],
     ['tts-voice', voiceSelectionDisabled],
     ['grant-user', c.panelAllowUserAccess === false],
     ['revoke-user', c.panelAllowUserAccess === false],
@@ -1043,7 +1043,7 @@ async function recover(client,rooms){
       const voice=guild.channels.cache.get(voiceId)||await guild.channels.fetch(voiceId).catch(()=>null);
       if(!voice||voice.type!==ChannelType.GuildVoice){
         await channel.delete('Temporary VC voice channel missing').catch(()=>{});
-        if(voice?.id)await client.db?.delete?.(guild.id,'tempvc:'+voice.id).catch(()=>{});
+        await client.db?.delete?.(guild.id,'tempvc:'+voiceId).catch(()=>{});
         continue;
       }
 
@@ -1106,7 +1106,7 @@ async function cleanup(client,rooms){
   try{
     for(const room of [...rooms.values()]){
       const guild=client.guilds.cache.get(room.guildId);
-      if(!guild){rooms.delete(room.voiceChannelId);continue;}
+      if(!guild){rooms.delete(room.voiceChannelId);await deletePersistedRoom(client,room);continue;}
       const voice=guild.channels.cache.get(room.voiceChannelId);
       if(!voice){
         rooms.delete(room.voiceChannelId);
