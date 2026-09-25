@@ -206,9 +206,12 @@ async function listLanguages(force = false) {
       if (!response.ok) throw new Error('Google language API HTTP ' + response.status);
       return readResponseBuffer(response, MAX_JSON_BYTES);
     })).toString('utf8'));
-    languageCache.values = Object.entries(data || {})
+    const source = data?.tl && typeof data.tl === 'object' ? data.tl :
+      data?.languages && typeof data.languages === 'object' ? data.languages :
+      data;
+    languageCache.values = Object.entries(source || {})
       .map(([code, name]) => ({ code: String(code), name: String(name) }))
-      .filter(x => x.code && x.name)
+      .filter(x => /^[a-z-]+$/i.test(x.code) && x.name && x.name !== '[object Object]')
       .sort((a, b) => a.name.localeCompare(b.name));
     languageCache.at = Date.now();
     return languageCache.values;
