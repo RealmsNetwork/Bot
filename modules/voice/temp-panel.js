@@ -789,7 +789,7 @@ async function handleButton(interaction,client,rooms){
   else if(action==='tts-stop')await tts.stop(room,client);
   else if(action==='speak')return showForm(interaction,'speak');
   else if(action==='rate-down')room.tts.rate=Math.max(50,(Number(room.tts.rate)||100)-10);
-  else if(action==='rate-up')room.tts.rate=Math.min(150,(Number(room.tts.rate)||100)+10);
+  else if(action==='rate-up'){const maxRate=Math.max(50,Math.min(150,Number(cfg(client).tts?.maxRate)||150));room.tts.rate=Math.min(maxRate,(Number(room.tts.rate)||100)+10);}
   else if(action==='volume')return showForm(interaction,'volume');
   return panelUpdate(interaction,client,room,room.page);
 }
@@ -848,13 +848,23 @@ async function handleModal(interaction,client,rooms){
     }else if(kind==='slowmode'){
       const n=Number(value);if(!Number.isInteger(n)||n<0||n>21600)throw new Error('Slowmode must be 0-21600 seconds.');await voice.setRateLimitPerUser(n);
     }else if(kind==='rate'){
-      const n=Number(value);if(!Number.isInteger(n)||n<50||n>150)throw new Error('TTS rate must be 50-150.');room.tts.rate=n;
+      const maxRate=Math.max(50,Math.min(150,Number(cfg(client).tts?.maxRate)||150));const n=Number(value);if(!Number.isInteger(n)||n<50||n>maxRate)throw new Error('TTS rate must be 50-'+maxRate+'.');room.tts.rate=n;
     }else if(kind==='volume'){
-      const n=Number(value);if(!Number.isInteger(n)||n<0||n>150)throw new Error('TTS volume must be 0-150.');room.tts.volume=n;
+      const maxVolume=Math.max(0,Math.min(150,Number(cfg(client).tts?.maxVolume)||150));const n=Number(value);if(!Number.isInteger(n)||n<0||n>maxVolume)throw new Error('TTS volume must be 0-'+maxVolume+'.');room.tts.volume=n;
     }else if(kind==='speak'){
       await tts.speak(client,room,value,interaction.member);
     }else if(kind==='tts-voice-manual'){
-      room.tts.voice=value;
+      const name=value.replace(/\s+/g,' ').trim();
+      if(!name)throw new Error('TTS voice cannot be empty.');
+      if(room.tts.provider==='edge'){
+        const voices=await tts.listVoices();
+        const match=voices.find(v=>(v.ShortName||v.Name)===name);
+        if(!match)throw new Error('That Edge TTS voice was not found. Use the voice browser.');
+        room.tts.voice=match.ShortName||match.Name;
+        room.tts.lang=match.Locale||room.tts.lang;
+      }else{
+        room.tts.voice=name;
+      }
     }else throw new Error('Unknown panel form.');
     room.page=kind==='speak'?'tts':'room';
     await interaction.editReply({content:'Updated.'});
