@@ -70,7 +70,7 @@ async function createTempRoom(member,client){
   let room=null;
   try{
     channel=await guild.channels.create(options);
-    room={guildId:guild.id,voiceChannelId:channel.id,panelChannelId:null,panelMessageId:null,ownerId:member.id,createdAt:Date.now(),locked:!!c.defaultLocked,hidden:!!c.defaultHidden,accessUsers:new Set([member.id]),accessRoles:new Set(),controlUsers:new Set([member.id]),controlRoles:new Set(),bannedUsers:new Set(),tts:{},page:'overview',emptySince:null,recoveryGraceUntil:0};
+    room={guildId:guild.id,voiceChannelId:channel.id,panelChannelId:null,panelMessageId:null,ownerId:member.id,createdAt:Date.now(),locked:!!c.defaultLocked,hidden:!!c.defaultHidden,accessUsers:new Set([member.id]),accessRoles:new Set(),controlUsers:new Set([member.id]),controlRoles:new Set(),bannedUsers:new Set(),tts:{},page:'overview',emptySince:null,recoveryGraceUntil:0,ownerLeftSince:null};
     tempRooms.set(channel.id,room);
     await channel.permissionOverwrites.edit(member.id,{Connect:true,Speak:true,ViewChannel:true});
     await tempPanel.create(client,member,channel,room);
@@ -114,6 +114,11 @@ const listeners=[
     if(room?.emptySince){
       room.emptySince=null;
       room.recoveryGraceUntil=0;
+    }
+    if(room?.ownerId===newState.member.id&&room?.ownerLeftSince){
+      room.ownerLeftSince=null;
+    }
+    if(room?.emptySince===null||room?.ownerLeftSince===null){
       await tempPanel.persistRoom(client,room).catch(()=>{});
     }
   }
@@ -125,16 +130,9 @@ const listeners=[
   }
   if(oldState.channelId&&tempRooms.has(oldState.channelId)){
     const room=tempRooms.get(oldState.channelId);
-    if(room&&room.ownerId===oldState.member?.id&&newState.channelId!==oldState.channelId&&c.autoTransferOnOwnerLeave!==false&&oldState.channel?.members?.size>0){
-      const next=[...oldState.channel.members.values()].filter(member=>member.id!==oldState.member?.id&&!member.user.bot&&!room.bannedUsers?.has(member.id)).sort((a,b)=>(a.joinedTimestamp||0)-(b.joinedTimestamp||0))[0];
-      if(next){
-        room.ownerId=next.id;
-        room.accessUsers?.add(next.id);
-        room.controlUsers?.add(next.id);
-        await oldState.guild.channels.cache.get(room.voiceChannelId)?.permissionOverwrites.edit(next.id,{Connect:true,Speak:true,ViewChannel:true}).catch(()=>{});
-        await oldState.guild.channels.cache.get(room.panelChannelId)?.permissionOverwrites.edit(next.id,{ViewChannel:true,ReadMessageHistory:true,SendMessages:false}).catch(()=>{});
-        await tempPanel.refresh(client,room,'overview').catch(()=>{});
-      }
+    if(room&&room.ownerId===oldState.member?.id&&newState.channelId!==oldState.channelId&&c.autoTransferOnOwnerLeave!==false){
+      room.ownerLeftSince=Date.now();
+      await tempPanel.persistRoom(client,room).catch(()=>{});
     }
     if(oldState.channel?.members.size===0){
       room.emptySince=Date.now();
