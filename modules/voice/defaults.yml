@@ -15,6 +15,8 @@ temporaryVoice:
   panelEnabled: true
   panelSuffix: "-panel"
   panelAutoPin: true
+  emptyRoomGraceSeconds: 300
+  recoveryGraceSeconds: 600
   panelAllowUserAccess: true
   panelAllowRoleAccess: true
   panelAccessCanControl: true
