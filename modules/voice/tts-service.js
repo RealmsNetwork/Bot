@@ -278,19 +278,26 @@ async function ensureConnection(client, room) {
   }
 }
 
+function finiteConfigNumber(value, fallback, min, max) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(min, Math.min(max, n));
+}
+
 function settingsFor(room, client) {
   const c = client.modules.get('voice')?.config?.tts || {};
   room.tts = room.tts && typeof room.tts === 'object' ? room.tts : {};
   if (!room.tts.provider) room.tts.provider = c.provider || 'edge';
   if (!room.tts.voice) room.tts.voice = c.defaultVoice || 'en-US-AriaNeural';
   if (!room.tts.lang) room.tts.lang = c.defaultLanguage || 'en-US';
-  if (!Number.isFinite(Number(room.tts.rate))) room.tts.rate = 100;
-  room.tts.rate = Math.max(50, Math.min(Number(c.maxRate || 150), Number(room.tts.rate)));
-  if (!Number.isFinite(Number(room.tts.volume))) room.tts.volume = Number(c.maxVolume || 100);
-  room.tts.volume = Math.max(0, Math.min(Number(c.maxVolume || 150), Number(room.tts.volume)));
-  room.tts.timeoutMs = Math.max(1000, Math.min(120000, Number(c.timeoutMs || DEFAULT_HTTP_TIMEOUT)));
-  room.tts.maxAudioBytes = Math.max(64 * 1024, Math.min(32 * 1024 * 1024, Number(c.maxAudioBytes || MAX_AUDIO_BYTES)));
-  room.tts.maxRemoteBytes = Math.max(64 * 1024, Math.min(32 * 1024 * 1024, Number(c.maxRemoteBytes || MAX_REMOTE_BYTES)));
+
+  const maxRate = finiteConfigNumber(c.maxRate, 150, 50, 150);
+  const maxVolume = finiteConfigNumber(c.maxVolume, 100, 0, 150);
+  room.tts.rate = finiteConfigNumber(room.tts.rate, 100, 50, maxRate);
+  room.tts.volume = finiteConfigNumber(room.tts.volume, maxVolume, 0, maxVolume);
+  room.tts.timeoutMs = finiteConfigNumber(c.timeoutMs, DEFAULT_HTTP_TIMEOUT, 1000, 120000);
+  room.tts.maxAudioBytes = finiteConfigNumber(c.maxAudioBytes, MAX_AUDIO_BYTES, 64 * 1024, 32 * 1024 * 1024);
+  room.tts.maxRemoteBytes = finiteConfigNumber(c.maxRemoteBytes, MAX_REMOTE_BYTES, 64 * 1024, 32 * 1024 * 1024);
   if (room.tts.enabled === undefined) room.tts.enabled = c.enabled !== false;
   if (room.tts.autoTts === undefined) room.tts.autoTts = false;
   if (room.tts.prefixName === undefined) room.tts.prefixName = true;
@@ -384,9 +391,26 @@ async function speak(client, room, text, member) {
   const max = Math.max(20, Number(client.modules.get('voice')?.config?.tts?.maxCharacters || 500));
   phrase = phrase.slice(0, max);
   if (settings.prefixName && member?.displayName) phrase = member.displayName + ' says ' + phrase;
-  const queueLimit = Math.max(1, Math.min(100, Number(client.modules.get('voice')?.config?.tts?.maxQueueSize || 20)));
+  const queueLimit = finiteConfigNumber(client.modules.get('voice')?.config?.tts?.maxQueueSize, 20, 1, 100);
   if ((room.ttsQueue?.length || 0) >= queueLimit) throw new Error('TTS queue is full. Please wait for the current speech to finish.');
   if (!room.guildId || !room.voiceChannelId) throw new Error('Invalid temporary voice room state.');
+
+  const cooldownMs = finiteConfigNumber(client.modules.get('voice')?.config?.tts?.cooldownSeconds, 0, 0, 60) * 1000;
+  if (cooldownMs > 0 && member?.id) {
+    if (!(room.ttsCooldowns instanceof Map)) room.ttsCooldowns = new Map();
+    const now = Date.now();
+    const previous = room.ttsCooldowns.get(member.id) || 0;
+    const remaining = cooldownMs - (now - previous);
+    if (remaining > 0) throw new Error('TTS cooldown active. Please wait ' + Math.ceil(remaining / 1000) + 's.');
+    room.ttsCooldowns.set(member.id, now);
+    if (room.ttsCooldowns.size > 1000) {
+      for (const [id, at] of room.ttsCooldowns) {
+        if (now - at >= cooldownMs) room.ttsCooldowns.delete(id);
+        if (room.ttsCooldowns.size <= 1000) break;
+      }
+    }
+  }
+
   await ensureConnection(client, room);
   ensurePlayer(room,client);
   room.ttsQueue.push({ text: phrase, settings, requestedAt: Date.now(), requestHash: shortHash(sha256(JSON.stringify({ phrase, settings }))) });
@@ -396,6 +420,7 @@ async function speak(client, room, text, member) {
 async function stop(room,client) {
   if (!room) return false;
   room.ttsGeneration = (room.ttsGeneration || 0) + 1;
+  room.ttsCooldowns?.clear?.();
   room.ttsQueue = [];
   room.ttsPlaying = false;
   room.ttsPlayer?.stop(true);
