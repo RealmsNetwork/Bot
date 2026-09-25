@@ -589,42 +589,62 @@ async function syncPermissions(room,guild,client){
   normalizeRoom(room,client);
   const voice=guild.channels.cache.get(room.voiceChannelId);
   const panel=guild.channels.cache.get(room.panelChannelId);
-  if(!voice||!panel)return;
+  if(!voice||!panel)throw new Error('Temporary VC permission targets no longer exist.');
+
   for(const id of room.accessUsers){
     if(room.bannedUsers.has(id))continue;
-    await panel.permissionOverwrites.edit(id,{ViewChannel:true,ReadMessageHistory:true,SendMessages:false}).catch(()=>{});
-    await voice.permissionOverwrites.edit(id,{ViewChannel:true,Connect:true,Speak:true}).catch(()=>{});
+    await panel.permissionOverwrites.edit(id,{ViewChannel:true,ReadMessageHistory:true,SendMessages:false});
+    await voice.permissionOverwrites.edit(id,{ViewChannel:true,Connect:true,Speak:true});
   }
   for(const id of room.accessRoles){
-    await panel.permissionOverwrites.edit(id,{ViewChannel:true,ReadMessageHistory:true,SendMessages:false}).catch(()=>{});
-    await voice.permissionOverwrites.edit(id,{ViewChannel:true,Connect:true,Speak:true}).catch(()=>{});
+    await panel.permissionOverwrites.edit(id,{ViewChannel:true,ReadMessageHistory:true,SendMessages:false});
+    await voice.permissionOverwrites.edit(id,{ViewChannel:true,Connect:true,Speak:true});
   }
-  for(const id of room.bannedUsers)await voice.permissionOverwrites.edit(id,{ViewChannel:false,Connect:false}).catch(()=>{});
+  for(const id of room.bannedUsers){
+    await voice.permissionOverwrites.edit(id,{ViewChannel:false,Connect:false});
+  }
 }
 
 async function grant(room,guild,id,type,client){
   normalizeRoom(room,client);
   if(room.bannedUsers.has(id))throw new Error('Unban that member before granting access.');
+  const targetSet=type==='role'?room.accessRoles:room.accessUsers;
   if(type==='role'){
     const role=guild.roles.cache.get(id);
     if(!role||role.managed||id===guild.roles.everyone.id)throw new Error('That role cannot be granted.');
     if(tc(client).panelAllowRoleAccess===false)throw new Error('Role access is disabled.');
-    room.accessRoles.add(id);
   }else{
     const member=guild.members.cache.get(id)||await guild.members.fetch(id).catch(()=>null);
     if(!member||member.user.bot)throw new Error('That user cannot be granted.');
     if(tc(client).panelAllowUserAccess===false)throw new Error('User access is disabled.');
-    room.accessUsers.add(id);
   }
-  await syncPermissions(room,guild,client);
+  const hadAccess=targetSet.has(id);
+  targetSet.add(id);
+  try{
+    await syncPermissions(room,guild,client);
+  }catch(e){
+    if(!hadAccess)targetSet.delete(id);
+    throw e;
+  }
 }
 
 async function revoke(room,guild,id,type,client){
   normalizeRoom(room,client);
   if(id===room.ownerId)throw new Error('The owner cannot be removed from panel access.');
-  if(type==='role')room.accessRoles.delete(id);else room.accessUsers.delete(id);
-  await guild.channels.cache.get(room.panelChannelId)?.permissionOverwrites.edit(id,{ViewChannel:null,ReadMessageHistory:null,SendMessages:null}).catch(()=>{});
-  if(room.syncPermissions!==false)await guild.channels.cache.get(room.voiceChannelId)?.permissionOverwrites.edit(id,{ViewChannel:null,Connect:null,Speak:null}).catch(()=>{});
+  const targetSet=type==='role'?room.accessRoles:room.accessUsers;
+  const hadAccess=targetSet.has(id);
+  if(!hadAccess)return;
+  const panel=guild.channels.cache.get(room.panelChannelId);
+  const voice=guild.channels.cache.get(room.voiceChannelId);
+  try{
+    await panel?.permissionOverwrites.edit(id,{ViewChannel:null,ReadMessageHistory:null,SendMessages:null});
+    if(room.syncPermissions!==false)await voice?.permissionOverwrites.edit(id,{ViewChannel:null,Connect:null,Speak:null});
+    targetSet.delete(id);
+  }catch(e){
+    if(room.syncPermissions!==false)await voice?.permissionOverwrites.edit(id,{ViewChannel:true,Connect:true,Speak:true}).catch(()=>{});
+    await panel?.permissionOverwrites.edit(id,{ViewChannel:true,ReadMessageHistory:true,SendMessages:false}).catch(()=>{});
+    throw e;
+  }
 }
 
 async function showForm(interaction,kind){
