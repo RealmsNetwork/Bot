@@ -744,7 +744,7 @@ function panelPayload(client, s) {
     new ButtonBuilder().setCustomId('rn-music:stop').setLabel('Stop').setStyle(ButtonStyle.Danger).setDisabled(!s.current && !s.queue.length),
     new ButtonBuilder().setCustomId('rn-music:shuffle').setLabel('Shuffle').setStyle(ButtonStyle.Secondary).setDisabled(s.queue.length < 2),
     new ButtonBuilder().setCustomId('rn-music:loop').setLabel('Loop: ' + s.loop).setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId('rn-music:lyrics').setLabel('Lyrics').setStyle(ButtonStyle.Secondary).setDisabled(!s.current),
+    new ButtonBuilder().setCustomId('rn-music:volume-down').setLabel('Vol -').setStyle(ButtonStyle.Secondary).setDisabled(s.volume <= 0),
     new ButtonBuilder().setCustomId('rn-music:volume-up').setLabel('Vol +').setStyle(ButtonStyle.Secondary).setDisabled(s.volume >= s.maxVolume)
   ));
 
@@ -1114,7 +1114,10 @@ async function handleComponent(interaction, client) {
   }
 
   if (id === 'rn-music:skip') {
-    s.player.stop(true);
+    if (s.transition) return interaction.reply({ content: 'The player is already changing tracks.', flags: MessageFlags.Ephemeral });
+    s.transition = true;
+    try { s.player.stop(true); } catch {}
+    s.transition = false;
     await advance(interaction.guildId, client, 'skip');
     return interaction.update(panelPayload(client, s));
   }
@@ -1152,6 +1155,12 @@ async function handleComponent(interaction, client) {
     } catch (e) {
       return interaction.reply({ content: e?.message || 'Lyrics unavailable.', flags: MessageFlags.Ephemeral });
     }
+  }
+
+  if (id === 'rn-music:volume-down') {
+    s.volume = clamp(s.volume - 10, 0, s.maxVolume);
+    s.resource?.volume?.setVolume(s.volume / 100);
+    return interaction.update(panelPayload(client, s));
   }
 
   if (id === 'rn-music:volume-up') {
@@ -1330,7 +1339,10 @@ function installLegacyCommands(commands) {
       const s = sessions.get(i.guildId);
       if (!s?.current) return i.reply({ content: 'Nothing is playing.', flags: MessageFlags.Ephemeral });
       if (!(await controlAllowed(i, c))) return i.reply({ content: 'Join the bot in its music voice channel first.', flags: MessageFlags.Ephemeral });
-      s.player.stop(true);
+      if (s.transition) return i.reply({ content: 'The player is already changing tracks.', flags: MessageFlags.Ephemeral });
+      s.transition = true;
+      try { s.player.stop(true); } catch {}
+      s.transition = false;
       await advance(i.guildId, c, 'skip');
       return i.reply('Skipped.');
     },
