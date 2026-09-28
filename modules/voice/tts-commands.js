@@ -24,6 +24,10 @@ function roomFor(i){
   return i.client.voiceRooms?.get(id)||i.client.voiceTtsRooms?.get(id)||null;
 }
 
+function clientTtsConfig(client){
+  return client.modules.get('voice')?.config?.tts||{};
+}
+
 function canControlTts(i, room) {
   return tempPanel.canControlTts(i, room, i.client);
 }
@@ -190,6 +194,7 @@ if(autoCommand){
       return i.editReply({content:'You do not have permission to change TTS settings for this voice channel.'});
     room.tts=tts.settingsFor(room,i.client);
     room.tts.autoTts=i.options.getBoolean('enabled',true);
+    room.tts.autoTtsAnyTextChannel=clientTtsConfig(i.client).autoTtsAnyTextChannel===true;
     room.tts.autoTtsChannelId=i.channelId;
     room.lastUsedAt=Date.now();
     return i.editReply({content:'AutoTTS '+(room.tts.autoTts?'enabled':'disabled')+' for '+(room.tts.autoTtsAnyTextChannel===true?'this voice channel.':'this text channel.')});
