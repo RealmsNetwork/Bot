@@ -20,7 +20,8 @@ function pruneRuntimeRooms(map, now = Date.now()) {
 }
 
 function roomFor(i){
-  return i.client.voiceRooms?.get(i.member?.voice?.channelId)||null;
+  const id=i.member?.voice?.channelId;
+  return i.client.voiceRooms?.get(id)||i.client.voiceTtsRooms?.get(id)||null;
 }
 
 function canControlTts(i, room) {
@@ -177,4 +178,79 @@ const commands=[
   {data:new SlashCommandBuilder().setName('voice').setDescription('Change your voice').addStringOption(o=>o.setName('voice').setDescription('Voice').setRequired(true)),execute:async i=>{if(!i.deferred&&!i.replied)await i.deferReply({flags:MessageFlags.Ephemeral});const r=roomFor(i);if(!r)return i.editReply({content:'Join your temporary voice room first.'});if(!controlConfigEnabled(i)||!voiceSelectionEnabled(i)||!canControlTts(i,r))return i.editReply({content:'You cannot change the voice settings for this room.'});const name=i.options.getString('voice',true);try{const list=await tts.listVoices();const v=list.find(x=>(x.ShortName||x.Name)===name);if(!v)return i.editReply({content:'That voice was not found. Try /voices.'});r.tts=tts.settingsFor(r,i.client);r.tts.provider='edge';r.tts.voice=name;r.tts.lang=v.Locale||r.tts.lang;if(!(await tempPanel.persistRoom(i.client,r)))return i.editReply({content:'The setting changed in memory but could not be safely saved. Please try again.'});return i.editReply({content:'Voice set to **'+name+'**.'});}catch(e){return i.editReply({content:'Could not change your voice right now. Please try again.'});}}}
 ];
 
-module.exports={commands};
+
+const autoCommand=commands.find(x=>x.data.name==='autotts');
+if(autoCommand){
+  autoCommand.data.setDescription('Enable or disable AutoTTS for your voice channel');
+  autoCommand.execute=async i=>{
+    await i.deferReply({flags:MessageFlags.Ephemeral});
+    const room=roomFor(i)||runtimeRoom(i);
+    if(!room)return i.editReply({content:'Join a voice channel first.'});
+    if(!controlConfigEnabled(i)||!canControlTts(i,room))
+      return i.editReply({content:'You do not have permission to change TTS settings for this voice channel.'});
+    room.tts=tts.settingsFor(room,i.client);
+    room.tts.autoTts=i.options.getBoolean('enabled',true);
+    room.tts.autoTtsChannelId=i.channelId;
+    room.lastUsedAt=Date.now();
+    return i.editReply({content:'AutoTTS '+(room.tts.autoTts?'enabled':'disabled')+' for '+(room.tts.autoTtsAnyTextChannel===true?'this voice channel.':'this text channel.')});
+  };
+}
+
+let leaveTimer=null;
+const emptySince=new Map();
+
+async function leaveEmptyTtsRooms(client){
+  const configured=Number(client.modules.get('voice')?.config?.music?.leaveDelaySeconds);
+  const delay=Math.max(30,Number.isFinite(configured)&&configured>0?configured:180)*1000;
+  const rooms=[...(client.voiceTtsRooms?.values?.()||[]),...(client.voiceRooms?.values?.()||[])];
+  for(const room of rooms){
+    const connection=room?.ttsConnection;
+    if(!connection)continue;
+    const session=client.voiceSessions?.get(room.guildId);
+    if(session?.connection===connection)continue;
+    const guild=client.guilds.cache.get(room.guildId);
+    const channel=guild?.channels?.cache.get(room.voiceChannelId);
+    if(!channel)continue;
+    const humans=channel.members.filter(m=>!m.user.bot).size;
+    const key=String(room.guildId)+':'+String(room.voiceChannelId);
+    if(humans>0){emptySince.delete(key);continue;}
+    if(!emptySince.has(key))emptySince.set(key,Date.now());
+    if(Date.now()-emptySince.get(key)<delay)continue;
+    try{await tts.stop(room,client);}catch{}
+    try{connection.destroy?.();}catch{}
+    if(room.ttsConnection===connection)room.ttsConnection=null;
+    emptySince.delete(key);
+  }
+}
+
+const listeners=[
+  {event:'messageCreate',handle:async(message,client)=>{
+    if(message.author?.bot||!message.guild||!message.member)return;
+    const voiceId=message.member.voice?.channelId;
+    if(!voiceId||client.voiceRooms?.has(voiceId))return;
+    const room=client.voiceTtsRooms?.get(voiceId);
+    if(!room?.tts?.autoTts)return;
+    const allowed=room.tts.autoTtsAnyTextChannel===true||!room.tts.autoTtsChannelId||room.tts.autoTtsChannelId===message.channelId;
+    if(!allowed)return;
+    const content=String(message.cleanContent||'').trim();
+    if(!content)return;
+    try{
+      room.lastUsedAt=Date.now();
+      await tts.speak(client,room,content,message.member);
+    }catch(e){console.error('[Voice/TTS Auto]',e?.stack||e);}
+  }}
+];
+
+async function initialize(client){
+  if(leaveTimer)clearInterval(leaveTimer);
+  leaveTimer=setInterval(()=>leaveEmptyTtsRooms(client).catch(e=>console.error('[Voice/TTS] Auto leave:',e?.message||e)),5000);
+  leaveTimer.unref?.();
+}
+
+async function destroy(){
+  if(leaveTimer)clearInterval(leaveTimer);
+  leaveTimer=null;
+  emptySince.clear();
+}
+
+module.exports={commands ,listeners,initialize,destroy};
