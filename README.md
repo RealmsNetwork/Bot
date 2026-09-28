@@ -55,10 +55,13 @@ Read-only mode is the safe default. When explicitly changed to writable mode, th
 
 The unified `voice` module includes:
 
-- Music playback and queueing
-- URL/search playback
-- Queue, skip, stop, now-playing and volume controls
+- Full music playback with YouTube, YouTube Music, SoundCloud, Spotify, Apple Music, Deezer, Tidal, Bandcamp and direct/radio URLs
+- `/music` interactive embed player with search, paginated results, sorting, queue view and playback controls
+- URL/search playback with Spotify/Apple Music/Deezer/Tidal metadata bridges to playable YouTube results
+- Queue, skip, stop, pause/resume, seek, rewind/forward, shuffle, loop, volume, lyrics, vote-skip and playlists
+- Automatic voice cleanup after 3 minutes with no human listeners
 - Text-to-speech using the configurable Edge TTS voice service
+- AutoTTS in both regular voice channels and temporary voice channels
 - Temporary voice channels
 - Owner-only temporary VC control panel
 - Lock/unlock and hide/unhide
