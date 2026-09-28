@@ -906,22 +906,36 @@ async function advance(guildId, client, reason) {
       }
     }
 
-    const next = s.queue.shift();
-    s.current = null;
-    s.resource = null;
-
+    const next = s.queue[0];
     if (!next) {
+      s.current = null;
+      s.resource = null;
       s.transition = false;
       await refreshPanel(guildId, client);
       return;
     }
 
+    s.current = null;
+    s.resource = null;
     s.transition = false;
+
     try {
       await playTrack(guildId, client, next, 0);
+      // Only remove a queued track after its stream has successfully started.
+      s.queue.shift();
     } catch (e) {
+      // Drop only the track that actually failed, then try the next queued track.
+      s.queue.shift();
       console.error('[Voice/Music] Failed track:', next.title, e?.message || e);
-      await advance(guildId, client, 'error');
+
+      if (s.queue.length) {
+        await advance(guildId, client, 'error');
+      } else {
+        s.current = null;
+        s.resource = null;
+        await refreshPanel(guildId, client);
+        if (!old) throw e;
+      }
     }
   } finally {
     s.transition = false;
