@@ -407,7 +407,7 @@ async function ensureYtdlp(client) {
     // Refresh stale cached binaries that predate the EJS transition.
     try {
       const version = String(await ytdlp.getVersion()).trim().split(/\s+/)[0];
-      if (/^\d{4}\.\d{2}\.\d{2}$/.test(version) && version < '2025.11.12') {
+      if (!configured && /^\d{4}\.\d{2}\.\d{2}$/.test(version) && version < '2025.11.12') {
         await YTDlpWrap.downloadFromGithub(binary);
         try { await fs.promises.chmod(binary, 0o755); } catch {}
         ytdlp = new YTDlpWrap(binary);
