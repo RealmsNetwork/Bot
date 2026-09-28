@@ -24,6 +24,7 @@ const {
 const { spawn } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
+const { PassThrough } = require('node:stream');
 const play = require('play-dl');
 
 let YTDlpWrap = null;
@@ -115,15 +116,15 @@ function host(url) {
 function detect(url) {
   const h = host(url);
   if (!h) return 'query';
-  if (h === 'youtu.be' || h.endsWith('youtube.com') || h.endsWith('youtube-nocookie.com')) {
+  if (h === 'youtu.be' || h === 'youtube.com' || h.endsWith('.youtube.com') || h === 'youtube-nocookie.com' || h.endsWith('.youtube-nocookie.com')) {
     return h === 'music.youtube.com' ? 'youtube_music' : 'youtube';
   }
-  if (h.endsWith('soundcloud.com')) return 'soundcloud';
+  if (h === 'soundcloud.com' || h.endsWith('.soundcloud.com')) return 'soundcloud';
   if (h === 'open.spotify.com' || h.endsWith('.spotify.com') || h === 'spotify.link') return 'spotify';
   if (h === 'music.apple.com') return 'apple';
   if (h === 'deezer.com' || h.endsWith('.deezer.com') || h.includes('deezer.page.link')) return 'deezer';
   if (h === 'tidal.com' || h.endsWith('.tidal.com') || h === 'listen.tidal.com') return 'tidal';
-  if (h.endsWith('bandcamp.com')) return 'bandcamp';
+  if (h === 'bandcamp.com' || h.endsWith('.bandcamp.com')) return 'bandcamp';
   if (/\.(mp3|wav|ogg|flac|m4a|aac|opus|webm)(\?.*)?$/i.test(url)) return 'direct';
   if (/\.(m3u|m3u8|pls)(\?.*)?$/i.test(url) || /icecast|shoutcast|radio/i.test(url)) return 'radio';
   return 'unknown';
@@ -214,8 +215,7 @@ async function connect(member, client) {
   }
 
   if (s.connection) {
-    s.transition = true;
-    try { s.player.stop(true); } catch {}
+    // Moving between voice channels must not kill the current audio player.
     try { s.connection.destroy(); } catch {}
     s.connection = null;
   }
@@ -395,28 +395,98 @@ async function ensureYtdlp(client) {
     const configured = String(mc(client).ytDlpBinaryPath || process.env.RN_YTDLP_PATH || '').trim();
     const binary = configured || path.join(process.cwd(), '.cache', 'yt-dlp');
     fs.mkdirSync(path.dirname(binary), { recursive: true });
+
     if (!fs.existsSync(binary)) {
       await YTDlpWrap.downloadFromGithub(binary);
       try { await fs.promises.chmod(binary, 0o755); } catch {}
     }
+
     ytdlp = new YTDlpWrap(binary);
+
+    // yt-dlp's full YouTube support requires the EJS challenge solver.
+    // Refresh stale cached binaries that predate the EJS transition.
+    try {
+      const version = String(await ytdlp.getVersion()).trim().split(/\s+/)[0];
+      if (/^\d{4}\.\d{2}\.\d{2}$/.test(version) && version < '2025.11.12') {
+        await YTDlpWrap.downloadFromGithub(binary);
+        try { await fs.promises.chmod(binary, 0o755); } catch {}
+        ytdlp = new YTDlpWrap(binary);
+      }
+    } catch {}
     return ytdlp;
   })();
   try { return await ytdlpPromise; }
   finally { ytdlpPromise = null; }
 }
 
+function ytdlpCommonArgs() {
+  const args = [
+    '--no-playlist',
+    '--no-warnings',
+    '--quiet',
+    '--js-runtimes',
+    'node:' + process.execPath,
+    '--remote-components',
+    'ejs:github'
+  ];
+  const cookies = String(process.env.RN_YOUTUBE_COOKIES_PATH || path.join(process.cwd(), 'cookies.txt')).trim();
+  if (cookies && fs.existsSync(cookies)) args.push('--cookies', cookies);
+  return args;
+}
+
 async function ytdlpInfo(client, url) {
   const wrapper = await ensureYtdlp(client);
-  return wrapper.getVideoInfo(url);
+  return wrapper.getVideoInfo([...ytdlpCommonArgs(), '-f', 'bestaudio/best', url]);
 }
 
 async function ytdlpStream(client, url, startSeconds) {
   const wrapper = await ensureYtdlp(client);
-  const args = ['--no-playlist', '--no-warnings', '--quiet', '-f', 'bestaudio/best', '-o', '-'];
-  if (Number(startSeconds) > 0) args.push('--download-sections', '*' + String(Number(startSeconds)), '--force-keyframes-at-cuts');
+  const args = [
+    ...ytdlpCommonArgs(),
+    '-f', 'bestaudio[ext=webm][acodec=opus]/bestaudio[acodec=opus]/bestaudio/best',
+    '-o', '-'
+  ];
+  if (Number(startSeconds) > 0) {
+    args.push('--download-sections', '*' + String(Number(startSeconds)), '--force-keyframes-at-cuts');
+  }
   args.push(url);
-  return wrapper.execStream(args);
+
+  const source = wrapper.execStream(args);
+  return await new Promise((resolve, reject) => {
+    let settled = false;
+    const passthrough = new PassThrough();
+    const timeout = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      try { source.ytDlpProcess?.kill(); } catch {}
+      reject(new Error('yt-dlp timeout: no audio data received within 20 seconds.'));
+    }, 20000);
+    timeout.unref?.();
+
+    source.once('data', firstChunk => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      passthrough.write(firstChunk);
+      source.pipe(passthrough);
+      resolve(passthrough);
+    });
+    source.once('error', error => {
+      if (settled) {
+        passthrough.destroy(error instanceof Error ? error : new Error(String(error)));
+        return;
+      }
+      settled = true;
+      clearTimeout(timeout);
+      reject(error instanceof Error ? error : new Error(String(error)));
+    });
+    source.once('end', () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      reject(new Error('yt-dlp produced no audio output.'));
+    });
+  });
 }
 
 function infoToTrack(info, source) {
@@ -699,7 +769,7 @@ function panelPayload(client, s) {
       { name: 'Queue', value: queueText(s), inline: false },
       { name: 'Volume', value: String(s.volume) + '%', inline: true },
       { name: 'Loop', value: s.loop, inline: true },
-      { name: 'Tracks', value: String(s.queue.length), inline: true }
+      { name: 'Queued', value: String(s.queue.length), inline: true }
     );
   } else {
     const start = s.panel.page * 10;
@@ -735,7 +805,7 @@ function panelPayload(client, s) {
 
   rows.push(new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId('rn-music:search').setLabel('Search').setStyle(ButtonStyle.Primary),
-    new ButtonBuilder().setCustomId('rn-music:play').setLabel('Play Selected').setStyle(ButtonStyle.Success).setDisabled(s.panel.selected == null),
+    new ButtonBuilder().setCustomId('rn-music:play').setLabel('Play Selected').setStyle(ButtonStyle.Success).setDisabled(!s.panel.results.length || s.panel.selected == null),
     new ButtonBuilder().setCustomId('rn-music:prev-page').setLabel('Previous').setStyle(ButtonStyle.Secondary).setDisabled(s.panel.view !== 'search' || s.panel.page <= 0),
     new ButtonBuilder().setCustomId('rn-music:next-page').setLabel('Next').setStyle(ButtonStyle.Secondary).setDisabled(s.panel.view !== 'search' || s.panel.page >= pages - 1),
     new ButtonBuilder().setCustomId('rn-music:queue').setLabel(s.panel.view === 'queue' ? 'Search' : 'Queue').setStyle(ButtonStyle.Secondary)
@@ -887,18 +957,32 @@ function installHooks(guildId, client) {
   });
 }
 
+function activeTtsRoom(client, guildId, channelId) {
+  return [...(client.voiceRooms?.values?.() || []), ...(client.voiceTtsRooms?.values?.() || [])]
+    .find(room => room?.guildId === guildId &&
+      room?.voiceChannelId === channelId &&
+      (room.ttsPlaying || room.ttsPump || room.ttsQueue?.length));
+}
+
 async function addTrack(client, interaction, track) {
   const s = getSession(interaction.guildId, client);
+  if (!interaction.member?.voice?.channelId) throw new Error('Join a voice channel first.');
   if (tooLong(client, track)) throw new Error('That track is over the configured maximum length.');
 
   const max = Math.max(1, Number(mc(client).maxQueueSize || 100));
   if (s.current && s.queue.length >= max) throw new Error('The music queue is full.');
 
+  if (activeTtsRoom(client, interaction.guildId, interaction.member.voice.channelId)) {
+    throw new Error('TTS is currently active in this voice room. Wait for it to finish before starting music.');
+  }
+
+  // Always follow the requester's current voice channel.
+  await connect(interaction.member, client);
+
   s.textChannelId = interaction.channelId;
   s.queue.push({ ...track, positionMs: 0 });
 
   if (!s.current) {
-    await connect(interaction.member, client);
     await advance(interaction.guildId, client, 'start');
     return 'started';
   }
@@ -991,11 +1075,12 @@ async function openMusic(interaction, client) {
       s.panel.query = clean(query, 200);
       s.panel.source = source;
       s.panel.page = 0;
-      s.panel.selected = null;
       s.panel.results = sortResults(
         /^https?:\/\//i.test(query) ? [await resolveUrl(client, query)] : await searchTracks(client, query, source, Number(mc(client).panelSearchLimit || 25)),
         s.panel.sort
       );
+      // A query/URL produces an immediately playable first result.
+      s.panel.selected = s.panel.results.length ? 0 : null;
     } catch (e) {
       return interaction.editReply('Music search failed: ' + (e?.message || e));
     }
@@ -1021,11 +1106,11 @@ async function handleModal(interaction, client) {
     s.panel.query = query;
     s.panel.source = source;
     s.panel.page = 0;
-    s.panel.selected = null;
     s.panel.results = sortResults(
       /^https?:\/\//i.test(query) ? [await resolveUrl(client, query)] : await searchTracks(client, query, source, Number(mc(client).panelSearchLimit || 25)),
       s.panel.sort
     );
+    s.panel.selected = s.panel.results.length ? 0 : null;
     s.panel.messageId = interaction.message.id;
     s.panel.channelId = interaction.channelId;
     await interaction.message.edit(panelPayload(client, s));
@@ -1038,6 +1123,10 @@ async function handleComponent(interaction, client) {
   const id = interaction.customId || '';
   const s = getSession(interaction.guildId, client);
 
+  if (s.panel.messageId && interaction.message?.id && s.panel.messageId !== interaction.message.id) {
+    return interaction.reply({ content: 'This music panel is no longer active.', flags: MessageFlags.Ephemeral });
+  }
+
   if (id === 'rn-music:search') return panelSearch(interaction, client);
 
   if (id === 'rn-music:result') {
@@ -1049,13 +1138,15 @@ async function handleComponent(interaction, client) {
     s.panel.sort = interaction.values?.[0] || 'popular';
     s.panel.results = sortResults(s.panel.results, s.panel.sort);
     s.panel.page = 0;
+    s.panel.selected = s.panel.results.length ? 0 : null;
     return interaction.update(panelPayload(client, s));
   }
 
   if (id === 'rn-music:prev-page' || id === 'rn-music:next-page') {
     const pages = Math.max(1, Math.ceil(s.panel.results.length / 10));
     s.panel.page = id.endsWith('prev-page') ? Math.max(0, s.panel.page - 1) : Math.min(pages - 1, s.panel.page + 1);
-    s.panel.selected = null;
+    const start = s.panel.page * 10;
+    s.panel.selected = start < s.panel.results.length ? start : null;
     return interaction.update(panelPayload(client, s));
   }
 
@@ -1066,7 +1157,7 @@ async function handleComponent(interaction, client) {
 
   if (id === 'rn-music:play') {
     const selected = Number(s.panel.selected);
-    const track = s.panel.results[selected];
+    const track = Number.isInteger(selected) && selected >= 0 ? s.panel.results[selected] : null;
     if (!track) return interaction.reply({ content: 'Select a track first.', flags: MessageFlags.Ephemeral });
     if (!interaction.member?.voice?.channelId) {
       return interaction.reply({ content: 'Join a voice channel first.', flags: MessageFlags.Ephemeral });
@@ -1075,7 +1166,6 @@ async function handleComponent(interaction, client) {
     await interaction.deferUpdate();
     try {
       // Play/queue follows the user's current voice channel.
-      await connect(interaction.member, client);
       const state = await addTrack(client, interaction, track);
       await interaction.message.edit(panelPayload(client, s));
       if (state === 'queued') await interaction.followUp({ content: 'Queued **' + clean(track.title, 180) + '**.', flags: MessageFlags.Ephemeral });
@@ -1380,7 +1470,11 @@ function installLegacyCommands(commands) {
       sessions.delete(i.guildId);
       return i.reply('Stopped and cleared the queue.');
     },
-    queue: async (i, c) => i.reply({ embeds: [makeEmbed(c, 'Music Queue', queueText(sessions.get(i.guildId)))] }),
+    queue: async (i, c) => {
+      if (!i.member?.voice?.channelId) return i.reply({ content: 'Join a voice channel first.', flags: MessageFlags.Ephemeral });
+      const s = sessions.get(i.guildId);
+      return i.reply({ embeds: [makeEmbed(c, 'Music Queue', queueText(s))] });
+    },
     volume: async (i, c) => {
       const s = sessions.get(i.guildId);
       if (!s) return i.reply({ content: 'Nothing is playing.', flags: MessageFlags.Ephemeral });
