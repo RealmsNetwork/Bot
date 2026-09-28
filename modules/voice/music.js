@@ -499,10 +499,10 @@ async function bridgeSearch(query, source, limit) {
         sourceUrl: x.external_urls?.spotify || '',
         popularity: Number(x.popularity || 0)
       }));
-    }
     } else {
       const found = await youtubeSearch(query, limit);
       return found.map(x => ({ ...x, sourceProvider: 'Spotify search', playbackProvider: 'YouTube mirror' }));
+    }
   } else if (source === 'apple') {
     const data = await apiJson('https://itunes.apple.com/search?term=' + encodeURIComponent(query) + '&entity=song&country=US&limit=' + clamp(limit || 10, 1, 25));
     metadata = (data.results || []).map(x => ({
