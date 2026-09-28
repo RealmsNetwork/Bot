@@ -563,7 +563,11 @@ async function searchTracks(client, query, source, limit) {
   if (!q) return [];
   if (s === 'soundcloud') return sourceSearchEnabled(client, 'soundcloud') ? soundcloudSearch(q, limit) : Promise.reject(new Error('SoundCloud search is disabled.'));
   if (s === 'spotify' || s === 'apple' || s === 'deezer') return sourceSearchEnabled(client, s) ? bridgeSearch(q, s, limit) : Promise.reject(new Error(sourceLabel(s) + ' search is disabled.'));
-  if (s === 'tidal') return sourceSearchEnabled(client, 'tidal') ? bridgeSearch(q, 'apple', limit) : Promise.reject(new Error('Tidal search is disabled.'));
+  if (s === 'tidal') {
+    if (!sourceSearchEnabled(client, 'tidal')) throw new Error('Tidal search is disabled.');
+    const found = await youtubeSearch(q, limit);
+    return found.map(x => ({ ...x, sourceProvider: 'Tidal search', playbackProvider: 'YouTube mirror' }));
+  }
   if (s === 'bandcamp') {
     if (!sourceSearchEnabled(client, 'bandcamp')) throw new Error('Bandcamp search is disabled.');
     const found = await youtubeSearch(q, limit);
