@@ -500,6 +500,9 @@ async function bridgeSearch(query, source, limit) {
         popularity: Number(x.popularity || 0)
       }));
     }
+    } else {
+      const found = await youtubeSearch(query, limit);
+      return found.map(x => ({ ...x, sourceProvider: 'Spotify search', playbackProvider: 'YouTube mirror' }));
   } else if (source === 'apple') {
     const data = await apiJson('https://itunes.apple.com/search?term=' + encodeURIComponent(query) + '&entity=song&country=US&limit=' + clamp(limit || 10, 1, 25));
     metadata = (data.results || []).map(x => ({
@@ -1269,6 +1272,12 @@ const newCommands = [
         if (list.length >= Number(mc(c).maxPlaylistSize || 200)) throw new Error('Playlist is full.');
         list.push({ url: track.sourceUrl || track.url, title: track.title });
         await c.db.set(i.guildId, key, list);
+        const index = await c.db.get(i.guildId, 'music:playlist:index', []).catch(() => []);
+        const rows = Array.isArray(index) ? index.filter(x => x && x.name) : [];
+        const entry = rows.find(x => String(x.name).toLowerCase() === name);
+        if (entry) entry.count = list.length;
+        else rows.push({ name, count: list.length });
+        await c.db.set(i.guildId, 'music:playlist:index', rows);
         return i.editReply('Added **' + clean(track.title, 160) + '** to **' + name + '**.');
       } catch (e) {
         return i.editReply('Playlist failed: ' + (e?.message || e));
