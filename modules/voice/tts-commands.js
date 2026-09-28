@@ -66,6 +66,7 @@ async function speak(i,provider,text,extra={}){
   const requestedVoice=extra.voice==null||extra.voice===''?undefined:String(extra.voice);
   const publicAudio = i.client.modules.get('voice')?.config?.tts?.allowPublicAudio !== false;
   const realRoom = roomFor(i);
+  if(!i.member?.voice?.channelId)return i.editReply({content:'Join a voice channel first.'});
   if(!realRoom && !publicAudio)return i.editReply({content:'Public TTS is disabled for this voice channel.'});
   const room=runtimeRoom(i);
   if(!room)return i.editReply({content:'Join a voice channel first.'});
@@ -197,6 +198,11 @@ if(autoCommand){
     room.tts.autoTtsAnyTextChannel=clientTtsConfig(i.client).autoTtsAnyTextChannel===true;
     room.tts.autoTtsChannelId=i.channelId;
     room.lastUsedAt=Date.now();
+    if (room.voiceChannelId && i.client.voiceTtsRooms?.has(room.voiceChannelId)) {
+      i.client.voiceTtsRooms.set(room.voiceChannelId, room);
+    }
+    const saved=await tempPanel.persistRoom(i.client,room).catch(()=>true);
+    if(!saved)return i.editReply({content:'AutoTTS changed in memory but could not be saved.'});
     return i.editReply({content:'AutoTTS '+(room.tts.autoTts?'enabled':'disabled')+' for '+(room.tts.autoTtsAnyTextChannel===true?'this voice channel.':'this text channel.')});
   };
 }
@@ -232,11 +238,15 @@ const listeners=[
   {event:'messageCreate',handle:async(message,client)=>{
     if(message.author?.bot||!message.guild||!message.member)return;
     const voiceId=message.member.voice?.channelId;
-    if(!voiceId||client.voiceRooms?.has(voiceId))return;
-    const room=client.voiceTtsRooms?.get(voiceId);
+    if(!voiceId)return;
+
+    // AutoTTS is supported in both TempVCs and normal voice channels.
+    const room=client.voiceRooms?.get(voiceId)||client.voiceTtsRooms?.get(voiceId);
     if(!room?.tts?.autoTts)return;
+
     const allowed=room.tts.autoTtsAnyTextChannel===true||!room.tts.autoTtsChannelId||room.tts.autoTtsChannelId===message.channelId;
     if(!allowed)return;
+
     const content=String(message.cleanContent||'').trim();
     if(!content)return;
     try{
