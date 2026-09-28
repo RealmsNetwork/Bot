@@ -666,10 +666,15 @@ function currentSummary(s) {
 }
 
 function queueText(s) {
-  if (!s?.queue?.length) return 'The queue is empty.';
-  return s.queue.slice(0, 12).map((x, i) =>
-    (i + 1) + '. **' + clean(x.title, 80) + '** · ' + fmt(x.duration)
-  ).join('\n') + (s.queue.length > 12 ? '\n…and ' + (s.queue.length - 12) + ' more.' : '');
+  const lines = [];
+  if (s?.current) lines.push('▶ **Now Playing:** ' + clean(s.current.title, 80) + ' · ' + fmt(s.current.duration));
+  if (s?.queue?.length) {
+    lines.push(...s.queue.slice(0, 12).map((x, i) =>
+      (i + 1) + '. **' + clean(x.title, 80) + '** · ' + fmt(x.duration)
+    ));
+    if (s.queue.length > 12) lines.push('…and ' + (s.queue.length - 12) + ' more.');
+  }
+  return lines.join('\n') || 'The queue is empty.';
 }
 
 function sortResults(results, sort) {
@@ -1063,10 +1068,13 @@ async function handleComponent(interaction, client) {
     const selected = Number(s.panel.selected);
     const track = s.panel.results[selected];
     if (!track) return interaction.reply({ content: 'Select a track first.', flags: MessageFlags.Ephemeral });
-    if (!(await controlAllowed(interaction, client))) return interaction.reply({ content: 'Join the bot in the music voice channel first.', flags: MessageFlags.Ephemeral });
+    if (!interaction.member?.voice?.channelId) {
+      return interaction.reply({ content: 'Join a voice channel first.', flags: MessageFlags.Ephemeral });
+    }
 
     await interaction.deferUpdate();
     try {
+      // Play/queue follows the user's current voice channel.
       await connect(interaction.member, client);
       const state = await addTrack(client, interaction, track);
       await interaction.message.edit(panelPayload(client, s));
