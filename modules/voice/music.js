@@ -466,8 +466,112 @@ async function ytdlpInfo(client, url) {
   return info || {};
 }
 
+let ffmpegPathPromise = null;
+
+async function ensureFfmpeg() {
+  const configured = String(process.env.FFMPEG_PATH || '').trim();
+  if (configured && fs.existsSync(configured)) return configured;
+
+  if (ffmpegPathPromise) return ffmpegPathPromise;
+
+  ffmpegPathPromise = (async () => {
+    // ffmpeg-static normally downloads its platform binary during npm install.
+    // Pterodactyl/Node environments can have the package without that binary,
+    // so repair it automatically before the first playback attempt.
+    try {
+      const candidate = require('ffmpeg-static');
+      if (candidate && fs.existsSync(candidate)) {
+        try { fs.chmodSync(candidate, 0o755); } catch {}
+        return candidate;
+      }
+    } catch {}
+
+    const cacheDir = path.join(process.cwd(), '.cache', 'ffmpeg');
+    const cached = path.join(cacheDir, process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg');
+    try {
+      if (fs.existsSync(cached)) {
+        try { fs.chmodSync(cached, 0o755); } catch {}
+        return cached;
+      }
+    } catch {}
+
+    fs.mkdirSync(cacheDir, { recursive: true });
+
+    // Re-run ffmpeg-static's own installer. This uses the package's official
+    // platform-aware binary source instead of hardcoding a Linux-only URL.
+    try {
+      const pkgDir = path.dirname(require.resolve('ffmpeg-static/package.json'));
+      const installer = path.join(pkgDir, 'install.js');
+      if (fs.existsSync(installer)) {
+        const child = spawn(process.execPath, [installer], {
+          cwd: pkgDir,
+          env: { ...process.env },
+          stdio: ['ignore', 'pipe', 'pipe']
+        });
+
+        let output = '';
+        child.stdout.on('data', x => { output = (output + x.toString()).slice(-4096); });
+        child.stderr.on('data', x => { output = (output + x.toString()).slice(-4096); });
+
+        await new Promise((resolve, reject) => {
+          child.once('error', reject);
+          child.once('close', code => code === 0 ? resolve() : reject(new Error(
+            'ffmpeg-static installer exited with code ' + code + (output ? ': ' + output.trim() : '')
+          )));
+        });
+
+        const repaired = require('ffmpeg-static');
+        if (repaired && fs.existsSync(repaired)) {
+          try { fs.chmodSync(repaired, 0o755); } catch {}
+          return repaired;
+        }
+      }
+    } catch (error) {
+      console.warn('[Voice/Music] Could not repair ffmpeg-static:', error?.message || error);
+    }
+
+    // Last resort: use a system ffmpeg if the host provides one.
+    const candidates = process.platform === 'win32'
+      ? ['ffmpeg.exe', 'ffmpeg']
+      : ['/usr/bin/ffmpeg', '/usr/local/bin/ffmpeg', 'ffmpeg'];
+
+    for (const candidate of candidates) {
+      if (candidate.includes('/') || candidate.endsWith('.exe')) {
+        if (fs.existsSync(candidate)) return candidate;
+      } else {
+        try {
+          const check = spawn(candidate, ['-version'], { stdio: 'ignore' });
+          const code = await new Promise(resolve => {
+            check.once('error', () => resolve(null));
+            check.once('close', value => resolve(value));
+          });
+          if (code === 0) return candidate;
+        } catch {}
+      }
+    }
+
+    throw new Error('FFmpeg is not installed and could not be downloaded automatically. Install ffmpeg-static or provide FFMPEG_PATH.');
+  })();
+
+  try {
+    return await ffmpegPathPromise;
+  } catch (error) {
+    ffmpegPathPromise = null;
+    throw error;
+  }
+}
+
 function ffmpegBinary() {
-  try { return process.env.FFMPEG_PATH || require('ffmpeg-static'); } catch { return 'ffmpeg'; }
+  // Kept synchronous for callers that already have a resolved path.
+  const configured = String(process.env.FFMPEG_PATH || '').trim();
+  if (configured && fs.existsSync(configured)) return configured;
+  try {
+    const candidate = require('ffmpeg-static');
+    if (candidate && fs.existsSync(candidate)) return candidate;
+  } catch {}
+  const cached = path.join(process.cwd(), '.cache', 'ffmpeg', process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg');
+  if (fs.existsSync(cached)) return cached;
+  return configured || 'ffmpeg';
 }
 
 function ffmpegErrorText(stderr) {
@@ -500,6 +604,7 @@ async function ytdlpStream(client, url, startSeconds) {
 
 async function ffmpegUrlStream(url, startSeconds, headers = {}) {
   const normalized = normalizeUrl(url);
+  const binary = await ensureFfmpeg();
   if (!normalized) throw new Error('The audio stream URL is empty or invalid.');
 
   const headerLines = Object.entries(headers)
@@ -529,7 +634,7 @@ async function ffmpegUrlStream(url, startSeconds, headers = {}) {
     'pipe:1'
   );
 
-  const ffmpeg = spawn(ffmpegBinary(), args, { stdio: ['ignore', 'pipe', 'pipe'] });
+  const ffmpeg = spawn(binary, args, { stdio: ['ignore', 'pipe', 'pipe'] });
   let stderr = '';
 
   ffmpeg.stderr.on('data', chunk => {
