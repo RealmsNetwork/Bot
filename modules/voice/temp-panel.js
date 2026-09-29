@@ -713,40 +713,81 @@ async function create(client,member,voice,room){
 }
 
 async function deleteRoom(client,rooms,room,guild,reason='Temporary voice room deleted'){
-  if(!room||room.deleting)return;
+  if(!room||room.deleting)return false;
   room.deleting=true;
-  await tts.stop(room,client);
-  const session=client.voiceSessions?.get(guild.id);
-  if(session?.connection===room.ttsConnection){
-    session.queue=[];
-    session.current=null;
-    session.player?.stop(true);
-    session.connection?.destroy?.();
-    session.connection=null;
-  }else{
-    room.ttsConnection?.destroy?.();
-  }
-  room.ttsConnection=null;
-  const panel=room.panelChannelId&&guild.channels.cache.get(room.panelChannelId);
-  const voice=guild.channels.cache.get(room.voiceChannelId);
-  let panelDeleted=!panel;
-  let voiceDeleted=!voice;
 
-  if(panel){
-    panelDeleted=!!await panel.delete(reason).then(()=>true).catch(e=>{console.error('[TempVC] Failed to delete panel:',e?.message||e);return false;});
-  }
-  if(voice&&voice.members.size){
-    for(const member of voice.members.values())if(!member.user.bot)await member.voice.disconnect(reason).catch(()=>{});
-  }
-  if(voice){
-    voiceDeleted=!!await voice.delete(reason).then(()=>true).catch(e=>{console.error('[TempVC] Failed to delete voice room:',e?.message||e);return false;});
-  }
+  try{
+    // Stop any TTS work first, but never let a TTS cleanup failure prevent the
+    // actual Discord channels from being deleted.
+    try{await tts.stop(room,client);}catch(e){
+      console.error('[TempVC] Failed to stop TTS during room deletion:',e?.message||e);
+    }
 
-  if(panelDeleted&&voiceDeleted){
-    rooms.delete(room.voiceChannelId);
-    await deletePersistedRoom(client,room);
-  }else{
+    const session=client.voiceSessions?.get?.(guild?.id);
+    const ttsConnection=room.ttsConnection;
+
+    // Only touch the shared music session when BOTH references actually exist.
+    // With the old check, undefined === undefined was true and session.queue
+    // crashed the entire cleanup pass.
+    if(session && session.connection && ttsConnection && session.connection===ttsConnection){
+      if(Array.isArray(session.queue))session.queue.length=0;
+      else session.queue=[];
+      session.current=null;
+      try{session.player?.stop(true);}catch{}
+      try{session.connection?.destroy?.();}catch{}
+      session.connection=null;
+      if(rooms?.connection===session.connection)rooms.connection=null;
+    }else{
+      try{ttsConnection?.destroy?.();}catch{}
+    }
+
+    room.ttsConnection=null;
+
+    const panel=room.panelChannelId&&guild?.channels?.cache?.get(room.panelChannelId);
+    const voice=guild?.channels?.cache?.get(room.voiceChannelId);
+    let panelDeleted=!panel;
+    let voiceDeleted=!voice;
+
+    if(panel){
+      try{
+        await panel.delete(reason);
+        panelDeleted=true;
+      }catch(e){
+        panelDeleted=false;
+        console.error('[TempVC] Failed to delete panel:',e?.message||e);
+      }
+    }
+
+    if(voice?.members?.size){
+      for(const member of [...voice.members.values()]){
+        if(!member?.user?.bot)await member.voice?.disconnect?.(reason).catch(()=>{});
+      }
+    }
+
+    if(voice){
+      try{
+        await voice.delete(reason);
+        voiceDeleted=true;
+      }catch(e){
+        voiceDeleted=false;
+        console.error('[TempVC] Failed to delete voice room:',e?.message||e);
+      }
+    }
+
+    if(panelDeleted&&voiceDeleted){
+      rooms?.delete?.(room.voiceChannelId);
+      try{await deletePersistedRoom(client,room);}catch(e){
+        console.error('[TempVC] Failed to remove persisted room state:',e?.message||e);
+      }
+      return true;
+    }
+
     room.deleting=false;
+    return false;
+  }catch(e){
+    room.deleting=false;
+    console.error('[TempVC] deleteRoom failed:',e?.stack||e);
+    return false;
   }
 }
 
@@ -1334,7 +1375,13 @@ async function cleanup(client,rooms){
         }
         if(Number(room.recoveryGraceUntil)>now)continue;
         if(now-Number(room.emptySince)>=emptyGraceMs(client)){
-          await deleteRoom(client,rooms,room,guild,'Temporary voice room empty');
+          try{
+            await deleteRoom(client,rooms,room,guild,'Temporary voice room empty');
+          }catch(e){
+            // One broken/stale room must never abort cleanup for every other room.
+            room.deleting=false;
+            console.error('[TempVC] Cleanup room deletion failed:',e?.stack||e);
+          }
         }
       }else if(room.emptySince){
         room.emptySince=null;
@@ -1385,4 +1432,4 @@ function destroy(){
   selections.clear();
 }
 
-module.exports={create,refresh,deleteRoom,initialize,destroy,recover,cleanup,handle,panelSlug,syncPermissions,normalizeRoom,channelUpdate,persistRoom};
+module.exports={create,refresh,deleteRoom,initialize,destroy,recover,cleanup,handle,panelSlug,syncPermissions,normalizeRoom,channelUpdate,persistRoom,canControlTts};
