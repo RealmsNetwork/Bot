@@ -626,7 +626,7 @@ async function ffmpegUrlStream(url, startSeconds, headers = {}) {
   const headerLines = Object.entries(headers)
     .filter(([key, value]) => key && value && !/^(host|content-length)$/i.test(key))
     .map(([key, value]) => key + ': ' + String(value).replace(/\r?\n/g, ' '))
-    .join('\\r\\n');
+    .join('\r\n');
 
   const args = [
     '-hide_banner',
@@ -638,7 +638,7 @@ async function ffmpegUrlStream(url, startSeconds, headers = {}) {
     '-reconnect_delay_max', '5'
   ];
 
-  if (headerLines) args.push('-headers', headerLines + '\\r\\n');
+  if (headerLines) args.push('-headers', headerLines + '\r\n');
   if (Number(startSeconds) > 0) args.push('-ss', String(Number(startSeconds)));
 
   args.push(
@@ -691,10 +691,17 @@ async function ffmpegUrlStream(url, startSeconds, headers = {}) {
       }
     });
 
-    ffmpeg.stdout.once('readable', () => {
+    ffmpeg.stdout.once('data', chunk => {
       if (settled) return;
       settled = true;
       clearTimeout(timeout);
+
+      // Put the first PCM chunk back so createAudioResource receives every
+      // byte. Waiting for actual data also prevents a false "started" state
+      // when FFmpeg exits without producing audio.
+      ffmpeg.stdout.pause();
+      ffmpeg.stdout.unshift(chunk);
+
       resolve({
         stream: ffmpeg.stdout,
         inputType: StreamType.Raw,
@@ -1232,7 +1239,8 @@ function installHooks(guildId, client) {
     advance(guildId, client, 'natural').catch(() => {});
   });
 
-  s.player.on('error', () => {
+  s.player.on('error', error => {
+    console.error('[Voice/Music] AudioPlayer error:', error?.message || error);
     if (!s.transition) advance(guildId, client, 'error').catch(() => {});
   });
 }
