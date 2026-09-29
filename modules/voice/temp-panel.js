@@ -1421,9 +1421,20 @@ async function channelUpdate(oldChannel,newChannel,client,rooms){
 
 function initialize(client,rooms){
   if(cleanupTimer)clearInterval(cleanupTimer);
-  cleanupTimer=setInterval(()=>cleanup(client,rooms).catch(e=>console.error('[TempVC] Cleanup:',e?.stack||e)),Math.max(10,Number(tc(client).cleanupIntervalSeconds||30))*1000);
+  cleanupTimer=setInterval(()=>cleanup(client,rooms).catch(e=>console.error('[TempVC] Cleanup:',e?.stack||e)),Math.max(5,Number(tc(client).cleanupIntervalSeconds||10))*1000);
   cleanupTimer.unref?.();
-  client.once('ready',()=>recover(client,rooms).catch(e=>console.error('[TempVC] Recovery:',e?.stack||e)));
+
+  const recoverOnce=()=>recover(client,rooms).catch(e=>console.error('[TempVC] Recovery:',e?.stack||e));
+  if(client.isReady?.()){
+    queueMicrotask(recoverOnce);
+  }else{
+    let major=14;
+    try{
+      const version=require('discord.js').version;
+      major=Number(String(version||'14').split('.')[0])||14;
+    }catch{}
+    client.once(major>=15?'clientReady':'ready',recoverOnce);
+  }
 }
 
 function destroy(){
