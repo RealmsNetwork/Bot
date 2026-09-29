@@ -1858,6 +1858,12 @@ async function initialize(client, sharedSessions) {
   monitorTimer.unref?.();
 
   if (panelTimer) clearInterval(panelTimer);
+  // Warm the static FFmpeg dependency during module startup so the first /play
+  // does not have to discover a missing package/binary silently.
+  ensureFfmpeg()
+    .then(binary => console.log('[Voice/Music] Static FFmpeg ready:', binary))
+    .catch(error => console.error('[Voice/Music] Static FFmpeg bootstrap failed:', error?.message || error));
+
   panelTimer = setInterval(() => {
     for (const [guildId] of sessions) refreshPanel(guildId, client).catch(() => {});
   }, 5000);
