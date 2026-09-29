@@ -113,11 +113,35 @@ function host(url) {
   try { return new URL(url).hostname.toLowerCase(); } catch { return ''; }
 }
 
+function normalizeUrl(value) {
+  let valueString = String(value || '').trim();
+  if (!valueString) return '';
+  valueString = valueString.replace(/^<|>$/g, '').trim();
+  try {
+    const parsed = new URL(valueString);
+    if (!/^https?:$/i.test(parsed.protocol)) return '';
+    return parsed.toString();
+  } catch {
+    return '';
+  }
+}
+
 function detect(url) {
-  const h = host(url);
+  const normalized = normalizeUrl(url);
+  const h = host(normalized);
   if (!h) return 'query';
-  if (h === 'youtu.be' || h === 'youtube.com' || h.endsWith('.youtube.com') || h === 'youtube-nocookie.com' || h.endsWith('.youtube-nocookie.com')) {
-    return h === 'music.youtube.com' ? 'youtube_music' : 'youtube';
+
+  const youtubeHosts = new Set([
+    'youtube.com',
+    'youtu.be',
+    'youtube-nocookie.com'
+  ]);
+  const isYoutube = youtubeHosts.has(h) ||
+    h.endsWith('.youtube.com') ||
+    h.endsWith('.youtube-nocookie.com');
+
+  if (isYoutube) {
+    return h === 'music.youtube.com' || h === 'music.youtube-nocookie.com' ? 'youtube_music' : 'youtube';
   }
   if (h === 'soundcloud.com' || h.endsWith('.soundcloud.com')) return 'soundcloud';
   if (h === 'open.spotify.com' || h.endsWith('.spotify.com') || h === 'spotify.link') return 'spotify';
@@ -435,11 +459,16 @@ function ytdlpCommonArgs() {
 }
 
 async function ytdlpInfo(client, url) {
+  const normalized = normalizeUrl(url);
+  if (!normalized) throw new Error('The resolved music URL is empty or invalid.');
   const wrapper = await ensureYtdlp(client);
-  return wrapper.getVideoInfo([...ytdlpCommonArgs(), '-f', 'bestaudio/best', url]);
+  const info = await wrapper.getVideoInfo([...ytdlpCommonArgs(), '-f', 'bestaudio/best', normalized]);
+  return info || {};
 }
 
 async function ytdlpStream(client, url, startSeconds) {
+  const normalized = normalizeUrl(url);
+  if (!normalized) throw new Error('The resolved playback URL is empty or invalid.');
   const wrapper = await ensureYtdlp(client);
   const args = [
     ...ytdlpCommonArgs(),
@@ -449,7 +478,7 @@ async function ytdlpStream(client, url, startSeconds) {
   if (Number(startSeconds) > 0) {
     args.push('--download-sections', '*' + String(Number(startSeconds)), '--force-keyframes-at-cuts');
   }
-  args.push(url);
+  args.push(normalized);
 
   const source = wrapper.execStream(args);
   return await new Promise((resolve, reject) => {
@@ -489,14 +518,15 @@ async function ytdlpStream(client, url, startSeconds) {
   });
 }
 
-function infoToTrack(info, source) {
+function infoToTrack(info, source, fallbackUrl = '') {
+  const resolvedUrl = normalizeUrl(info?.webpage_url || info?.original_url || fallbackUrl);
   return {
-    id: String(info?.id || info?.webpage_url || Date.now()),
+    id: String(info?.id || resolvedUrl || Date.now()),
     title: clean(info?.title || 'Unknown track', 200),
     artist: clean(info?.artist || info?.uploader || info?.channel || '', 120),
-    url: info?.webpage_url || info?.original_url || '',
-    playbackUrl: info?.webpage_url || info?.original_url || '',
-    sourceUrl: info?.webpage_url || info?.original_url || '',
+    url: resolvedUrl,
+    playbackUrl: resolvedUrl,
+    sourceUrl: resolvedUrl,
     sourceProvider: source || info?.extractor_key || 'Direct',
     playbackProvider: 'yt-dlp',
     duration: seconds(info?.duration),
@@ -516,9 +546,9 @@ async function youtubeSearch(query, limit) {
     id: x.id || x.url,
     title: clean(x.title, 200),
     artist: clean(x.channel?.name || x.author?.name || '', 120),
-    url: x.url,
-    playbackUrl: x.url,
-    sourceUrl: x.url,
+    url: normalizeUrl(x.url || x.webpage_url || (x.id ? 'https://www.youtube.com/watch?v=' + encodeURIComponent(x.id) : '')),
+    playbackUrl: normalizeUrl(x.url || x.webpage_url || (x.id ? 'https://www.youtube.com/watch?v=' + encodeURIComponent(x.id) : '')),
+    sourceUrl: normalizeUrl(x.url || x.webpage_url || (x.id ? 'https://www.youtube.com/watch?v=' + encodeURIComponent(x.id) : '')),
     sourceProvider: 'YouTube',
     playbackProvider: 'yt-dlp',
     duration: seconds(x.durationInSec),
@@ -538,9 +568,9 @@ async function soundcloudSearch(query, limit) {
     id: x.id || x.url,
     title: clean(x.name || x.title, 200),
     artist: clean(x.user?.username || x.publisher_metadata?.artist || '', 120),
-    url: x.url,
-    playbackUrl: x.url,
-    sourceUrl: x.url,
+    url: normalizeUrl(x.url || x.webpage_url),
+    playbackUrl: normalizeUrl(x.url || x.webpage_url),
+    sourceUrl: normalizeUrl(x.url || x.webpage_url),
     sourceProvider: 'SoundCloud',
     playbackProvider: 'yt-dlp',
     duration: seconds(x.durationInSec),
@@ -647,6 +677,9 @@ async function searchTracks(client, query, source, limit) {
 }
 
 async function resolveUrl(client, url) {
+  const normalized = normalizeUrl(url);
+  if (!normalized) throw new Error('Please provide a valid http(s) music URL.');
+  url = normalized;
   const type = detect(url);
 
   if (type === 'spotify' || type === 'apple' || type === 'deezer') {
@@ -675,14 +708,14 @@ async function resolveUrl(client, url) {
   if (type === 'youtube' || type === 'youtube_music') {
     try {
       const info = await play.video_basic_info(url);
-      return infoToTrack(info.video_details, type === 'youtube_music' ? 'YouTube Music' : 'YouTube');
+      return infoToTrack(info.video_details, type === 'youtube_music' ? 'YouTube Music' : 'YouTube', url);
     } catch {
-      return infoToTrack(await ytdlpInfo(client, url), type === 'youtube_music' ? 'YouTube Music' : 'YouTube');
+      return infoToTrack(await ytdlpInfo(client, url), type === 'youtube_music' ? 'YouTube Music' : 'YouTube', url);
     }
   }
 
   if (type === 'soundcloud' || type === 'bandcamp' || type === 'unknown') {
-    return infoToTrack(await ytdlpInfo(client, url), type === 'soundcloud' ? 'SoundCloud' : type === 'bandcamp' ? 'Bandcamp' : null);
+    return infoToTrack(await ytdlpInfo(client, url), type === 'soundcloud' ? 'SoundCloud' : type === 'bandcamp' ? 'Bandcamp' : null, url);
   }
 
   if (type === 'direct' || type === 'radio') {
@@ -849,7 +882,8 @@ async function playTrack(guildId, client, track, offsetMs) {
     try { s.player.stop(true); } catch {}
     s.resource = null;
 
-    const input = track.playbackUrl || track.url;
+    const input = normalizeUrl(track.playbackUrl || track.url || track.sourceUrl);
+    if (!input) throw new Error('This track has no valid playback URL.');
     let stream;
     let inputType = StreamType.Arbitrary;
 
