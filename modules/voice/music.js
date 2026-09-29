@@ -24,7 +24,6 @@ const {
 const { spawn } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
-const { PassThrough } = require('node:stream');
 const play = require('play-dl');
 
 let YTDlpWrap = null;
@@ -480,60 +479,77 @@ async function ytdlpStream(client, url, startSeconds) {
   if (!normalized) throw new Error('The resolved playback URL is empty or invalid.');
 
   const wrapper = await ensureYtdlp(client);
-  const args = [
+  const info = await wrapper.getVideoInfo([
     ...ytdlpCommonArgs(),
     '-f', 'bestaudio/best',
-    '-o', '-'
-  ];
+    normalized
+  ]);
 
-  if (Number(startSeconds) > 0) {
-    args.push('--download-sections', '*' + String(Number(startSeconds)), '--force-keyframes-at-cuts');
-  }
+  const format = info?.requested_formats?.find(x => x?.url) ||
+    (info?.url ? info : null) ||
+    [...(info?.formats || [])]
+      .filter(x => x?.url && x?.acodec && x.acodec !== 'none')
+      .sort((a, b) => Number(b.abr || b.tbr || 0) - Number(a.abr || a.tbr || 0))[0];
 
-  args.push(normalized);
+  const directUrl = normalizeUrl(format?.url);
+  if (!directUrl) throw new Error('yt-dlp resolved the track, but did not return a playable media URL.');
 
-  const source = wrapper.execStream(args);
-  const ffmpeg = spawn(ffmpegBinary(), [
+  const headers = format?.http_headers || info?.http_headers || {};
+  return ffmpegUrlStream(directUrl, startSeconds, headers);
+}
+
+async function ffmpegUrlStream(url, startSeconds, headers = {}) {
+  const normalized = normalizeUrl(url);
+  if (!normalized) throw new Error('The audio stream URL is empty or invalid.');
+
+  const headerLines = Object.entries(headers)
+    .filter(([key, value]) => key && value && !/^(host|content-length)$/i.test(key))
+    .map(([key, value]) => key + ': ' + String(value).replace(/\r?\n/g, ' '))
+    .join('\\r\\n');
+
+  const args = [
     '-hide_banner',
     '-loglevel', 'error',
-    '-i', 'pipe:0',
+    '-nostdin',
+    '-reconnect', '1',
+    '-reconnect_streamed', '1',
+    '-reconnect_at_eof', '1',
+    '-reconnect_delay_max', '5'
+  ];
+
+  if (headerLines) args.push('-headers', headerLines + '\\r\\n');
+  if (Number(startSeconds) > 0) args.push('-ss', String(Number(startSeconds)));
+
+  args.push(
+    '-i', normalized,
     '-vn',
     '-ar', '48000',
     '-ac', '2',
     '-f', 's16le',
     'pipe:1'
-  ], { stdio: ['pipe', 'pipe', 'pipe'] });
+  );
 
+  const ffmpeg = spawn(ffmpegBinary(), args, { stdio: ['ignore', 'pipe', 'pipe'] });
   let stderr = '';
+
   ffmpeg.stderr.on('data', chunk => {
     stderr = (stderr + chunk.toString()).slice(-8192);
   });
 
   const cleanup = () => {
-    try { source.unpipe(ffmpeg.stdin); } catch {}
-    try { source.ytDlpProcess?.kill(); } catch {}
-    try { source.destroy(); } catch {}
-    try { ffmpeg.stdin.destroy(); } catch {}
     try { ffmpeg.kill('SIGKILL'); } catch {}
     try { ffmpeg.stdout.destroy(); } catch {}
+    try { ffmpeg.stderr.destroy(); } catch {}
   };
-
-  source.once('error', () => {
-    try { ffmpeg.stdin.destroy(); } catch {}
-    if (ffmpeg.exitCode == null) {
-      try { ffmpeg.kill('SIGKILL'); } catch {}
-    }
-  });
-
-  source.pipe(ffmpeg.stdin);
 
   return await new Promise((resolve, reject) => {
     let settled = false;
+
     const timeout = setTimeout(() => {
       if (settled) return;
       settled = true;
       cleanup();
-      reject(new Error('yt-dlp/FFmpeg timeout: no playable audio data received within 20 seconds.'));
+      reject(new Error('FFmpeg timeout: no playable audio data received within 20 seconds.'));
     }, 20000);
     timeout.unref?.();
 
@@ -545,7 +561,7 @@ async function ytdlpStream(client, url, startSeconds) {
       reject(error instanceof Error ? error : new Error(String(error)));
     };
 
-    ffmpeg.once('error', error => fail(error));
+    ffmpeg.once('error', fail);
     ffmpeg.once('close', code => {
       if (!settled && code !== 0) {
         fail(new Error('FFmpeg exited with code ' + code + (ffmpegErrorText(stderr) ? ': ' + ffmpegErrorText(stderr) : '.')));
@@ -568,6 +584,8 @@ async function ytdlpStream(client, url, startSeconds) {
 }
 
 async function ffmpegDirectStream(url, startSeconds) {
+  return ffmpegUrlStream(url, startSeconds);
+}(url, startSeconds) {
   const normalized = normalizeUrl(url);
   if (!normalized) throw new Error('The direct playback URL is empty or invalid.');
 
@@ -1461,6 +1479,7 @@ async function handleComponent(interaction, client) {
 
   if (id === 'rn-music:stop') {
     s.transition = true;
+    await cleanupActiveStream(s);
     s.queue = [];
     s.history = [];
     s.current = null;
@@ -1693,6 +1712,7 @@ function installLegacyCommands(commands) {
       const s = sessions.get(i.guildId);
       if (!s) return i.reply({ content: 'Nothing is playing.', flags: MessageFlags.Ephemeral });
       if (!(await controlAllowed(i, c))) return i.reply({ content: 'Join the bot in its music voice channel first.', flags: MessageFlags.Ephemeral });
+      await cleanupActiveStream(s);
       s.queue = [];
       s.history = [];
       s.current = null;
@@ -1752,6 +1772,7 @@ async function autoLeave(client) {
     }
 
     s.transition = true;
+    await cleanupActiveStream(s);
     try { s.player.stop(true); } catch {}
     try { s.connection?.destroy(); } catch {}
     sessions.delete(guildId);
