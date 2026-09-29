@@ -22,7 +22,7 @@ const {
 } = require('@discordjs/voice');
 
 const { spawn } = require('node:child_process');
-const { PassThrough } = require('node:stream');
+const { PassThrough, Readable } = require('node:stream');
 const fs = require('node:fs');
 const path = require('node:path');
 const play = require('play-dl');
@@ -525,60 +525,47 @@ async function ensureFfmpeg() {
   if (ffmpegPathPromise) return ffmpegPathPromise;
 
   ffmpegPathPromise = (async () => {
-    const installed = await getInstalledFfmpegStatic();
-    if (installed) return installed;
+    const systemCandidates = process.platform === 'win32'
+      ? ['ffmpeg.exe', 'ffmpeg']
+      : ['/usr/bin/ffmpeg', '/usr/local/bin/ffmpeg', 'ffmpeg'];
+
+    for (const candidate of systemCandidates) {
+      if (await verifyFfmpeg(candidate)) {
+        console.log('[Voice/Music] Using system FFmpeg:', candidate);
+        return candidate;
+      }
+    }
 
     const cacheDir = path.join(process.cwd(), '.cache', 'ffmpeg');
     const cached = path.join(cacheDir, process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg');
     fs.mkdirSync(cacheDir, { recursive: true });
     if (await verifyFfmpeg(cached)) {
       try { fs.chmodSync(cached, 0o755); } catch {}
+      console.warn('[Voice/Music] Using cached FFmpeg:', cached);
       return cached;
+    }
+
+    const installed = await getInstalledFfmpegStatic();
+    if (installed) {
+      console.warn('[Voice/Music] Using ffmpeg-static fallback:', installed);
+      return installed;
     }
 
     console.log('[Voice/Music] ffmpeg-static missing/broken. Installing ffmpeg-static@5.3.0...');
     await installFfmpegStaticPackage();
 
     const installedAfterNpm = await getInstalledFfmpegStatic();
-    if (installedAfterNpm) return installedAfterNpm;
-
-    try {
-      const pkgDir = path.dirname(require.resolve('ffmpeg-static/package.json'));
-      const installer = path.join(pkgDir, 'install.js');
-      if (fs.existsSync(installer)) {
-        console.log('[Voice/Music] Repairing ffmpeg-static binary with its installer...');
-        const child = spawn(process.execPath, [installer], {
-          cwd: pkgDir, env: { ...process.env }, stdio: ['ignore', 'pipe', 'pipe']
-        });
-        let output = '';
-        child.stdout.on('data', x => { output = (output + x.toString()).slice(-8192); });
-        child.stderr.on('data', x => { output = (output + x.toString()).slice(-8192); });
-        await new Promise((resolve, reject) => {
-          child.once('error', reject);
-          child.once('close', code => code === 0 ? resolve() : reject(new Error(
-            'ffmpeg-static installer exited with code ' + code + (output ? ': ' + output.trim() : '')
-          )));
-        });
-        const repaired = await getInstalledFfmpegStatic();
-        if (repaired) return repaired;
-      }
-    } catch (error) {
-      console.warn('[Voice/Music] Could not repair ffmpeg-static:', error?.message || error);
+    if (installedAfterNpm) {
+      console.warn('[Voice/Music] Using repaired ffmpeg-static fallback:', installedAfterNpm);
+      return installedAfterNpm;
     }
 
-    for (const candidate of (process.platform === 'win32'
-      ? ['ffmpeg.exe', 'ffmpeg']
-      : ['/usr/bin/ffmpeg', '/usr/local/bin/ffmpeg', 'ffmpeg'])) {
-      if (await verifyFfmpeg(candidate)) return candidate;
-    }
-
-    throw new Error('ffmpeg-static could not be installed or its static binary could not be started.');
+    throw new Error('No working FFmpeg executable was found.');
   })();
 
   try { return await ffmpegPathPromise; }
   catch (error) { ffmpegPathPromise = null; throw error; }
 }
-
 function ffmpegBinary() {
   const configured = String(process.env.FFMPEG_PATH || '').trim();
   if (configured && fs.existsSync(configured)) return configured;
@@ -624,65 +611,85 @@ async function ffmpegUrlStream(url, startSeconds, headers = {}) {
   const binary = await ensureFfmpeg();
   if (!normalized) throw new Error('The audio stream URL is empty or invalid.');
 
-  const headerLines = Object.entries(headers)
-    .filter(([key, value]) => key && value && !/^(host|content-length)$/i.test(key))
-    .map(([key, value]) => key + ': ' + String(value).replace(/\r?\n/g, ' '))
-    .join('\r\n');
+  // Keep HTTPS/network handling in Node. ffmpeg-static has an open SIGSEGV
+  // report for remote HTTPS inputs, while this process only receives local
+  // bytes over stdin.
+  const controller = new AbortController();
+  const fetchTimer = setTimeout(() => controller.abort(), 20000);
+  fetchTimer.unref?.();
 
-  const args = [
+  let response;
+  try {
+    const requestHeaders = {};
+    for (const [key, value] of Object.entries(headers || {})) {
+      if (!key || value == null || /^(host|content-length|content-type)$/i.test(key)) continue;
+      requestHeaders[key] = String(value);
+    }
+
+    response = await fetch(normalized, {
+      headers: requestHeaders,
+      redirect: 'follow',
+      signal: controller.signal
+    });
+
+    if (!response.ok) throw new Error('Media request returned HTTP ' + response.status + '.');
+    if (!response.body) throw new Error('Media request returned no body.');
+  } catch (e) {
+    throw e?.name === 'AbortError'
+      ? new Error('Media request timed out while opening the stream.')
+      : e;
+  } finally {
+    clearTimeout(fetchTimer);
+  }
+
+  const ffmpeg = spawn(binary, [
     '-hide_banner',
     '-loglevel', 'error',
     '-nostdin',
-    '-reconnect', '1',
-    '-reconnect_streamed', '1',
-    '-reconnect_at_eof', '1',
-    '-reconnect_delay_max', '5'
-  ];
-
-  if (headerLines) args.push('-headers', headerLines + '\r\n');
-  if (Number(startSeconds) > 0) args.push('-ss', String(Number(startSeconds)));
-
-  args.push(
-    '-i', normalized,
+    '-i', 'pipe:0',
+    ...(Number(startSeconds) > 0 ? ['-ss', String(Number(startSeconds))] : []),
     '-vn',
     '-ar', '48000',
     '-ac', '2',
     '-f', 's16le',
     'pipe:1'
-  );
+  ], { stdio: ['pipe', 'pipe', 'pipe'] });
 
-  const ffmpeg = spawn(binary, args, { stdio: ['ignore', 'pipe', 'pipe'] });
   let stderr = '';
-  let output = null;
+  let output = new PassThrough({ highWaterMark: 64 * 1024 });
+  let sourceStream = null;
   let cleaned = false;
 
   ffmpeg.stderr.on('data', chunk => {
     stderr = (stderr + chunk.toString()).slice(-8192);
   });
 
-  // Use a bounded PassThrough instead of stdout.unshift(). This keeps the
-  // PCM stream flowing normally and avoids retaining an old chunk on the
-  // child-process stream across track transitions.
-  output = new PassThrough({ highWaterMark: 64 * 1024 });
-
   const cleanup = () => {
-    if(cleaned)return;
-    cleaned=true;
-    try{output?.destroy();}catch{}
-    try{ffmpeg.stdout?.destroy();}catch{}
-    try{ffmpeg.stderr?.destroy();}catch{}
-    if(!ffmpeg.killed){
-      try{ffmpeg.kill('SIGKILL');}catch{}
+    if (cleaned) return;
+    cleaned = true;
+    try { sourceStream?.destroy?.(); } catch {}
+    try { response?.body?.cancel?.(); } catch {}
+    try { ffmpeg.stdin?.destroy(); } catch {}
+    try { output?.destroy(); } catch {}
+    try { ffmpeg.stdout?.destroy(); } catch {}
+    try { ffmpeg.stderr?.destroy(); } catch {}
+    if (!ffmpeg.killed) {
+      try { ffmpeg.kill('SIGKILL'); } catch {}
     }
   };
 
   output.once('close', cleanup);
-  ffmpeg.once('error', error => {
-    if(output&&!output.destroyed)output.destroy(error instanceof Error?error:new Error(String(error)));
+
+  sourceStream = Readable.fromWeb(response.body);
+  sourceStream.once('error', error => {
+    if (!cleaned && !ffmpeg.stdin.destroyed) {
+      try { ffmpeg.stdin.destroy(error); } catch {}
+    }
   });
 
   return await new Promise((resolve, reject) => {
     let settled = false;
+    let gotOutput = false;
 
     const timeout = setTimeout(() => {
       if (settled) return;
@@ -700,34 +707,42 @@ async function ffmpegUrlStream(url, startSeconds, headers = {}) {
       reject(error instanceof Error ? error : new Error(String(error)));
     };
 
-    ffmpeg.once('error', fail);
-    ffmpeg.once('close', code => {
-      if (!settled && code !== 0) {
-        const signal = ffmpeg.signalCode ? ' (' + ffmpeg.signalCode + ')' : '';
-        fail(new Error('FFmpeg exited with code ' + code + signal + (ffmpegErrorText(stderr) ? ': ' + ffmpegErrorText(stderr) : '.')));
-      } else if (!settled) {
-        fail(new Error('FFmpeg produced no audio output.'));
-      }
-    });
-
-    ffmpeg.stdout.once('error', fail);
-    ffmpeg.stdout.once('data', chunk => {
+    const succeed = () => {
       if (settled) return;
       settled = true;
       clearTimeout(timeout);
-
-      output.write(chunk);
-      ffmpeg.stdout.pipe(output);
-
       resolve({
         stream: output,
         inputType: StreamType.Raw,
         cleanup
       });
+    };
+
+    ffmpeg.once('error', fail);
+    ffmpeg.once('close', code => {
+      if (!settled && code !== 0) {
+        const signal = ffmpeg.signalCode ? ' (' + ffmpeg.signalCode + ')' : '';
+        fail(new Error('FFmpeg exited with code ' + code + signal + (ffmpegErrorText(stderr) ? ': ' + ffmpegErrorText(stderr) : '.')));
+      } else if (!settled && !gotOutput) {
+        fail(new Error('FFmpeg produced no audio output.'));
+      }
+    });
+
+    ffmpeg.stdout.once('error', fail);
+    ffmpeg.stdin.once('error', fail);
+    sourceStream.once('error', fail);
+
+    sourceStream.pipe(ffmpeg.stdin);
+
+    ffmpeg.stdout.once('data', chunk => {
+      if (settled) return;
+      gotOutput = true;
+      output.write(chunk);
+      ffmpeg.stdout.pipe(output);
+      succeed();
     });
   });
 }
-
 async function ffmpegDirectStream(url, startSeconds) {
   return ffmpegUrlStream(url, startSeconds);
 }
