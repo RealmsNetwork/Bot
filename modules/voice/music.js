@@ -22,6 +22,7 @@ const {
 } = require('@discordjs/voice');
 
 const { spawn } = require('node:child_process');
+const { PassThrough } = require('node:stream');
 const fs = require('node:fs');
 const path = require('node:path');
 const play = require('play-dl');
@@ -652,16 +653,33 @@ async function ffmpegUrlStream(url, startSeconds, headers = {}) {
 
   const ffmpeg = spawn(binary, args, { stdio: ['ignore', 'pipe', 'pipe'] });
   let stderr = '';
+  let output = null;
+  let cleaned = false;
 
   ffmpeg.stderr.on('data', chunk => {
     stderr = (stderr + chunk.toString()).slice(-8192);
   });
 
+  // Use a bounded PassThrough instead of stdout.unshift(). This keeps the
+  // PCM stream flowing normally and avoids retaining an old chunk on the
+  // child-process stream across track transitions.
+  output = new PassThrough({ highWaterMark: 64 * 1024 });
+
   const cleanup = () => {
-    try { ffmpeg.kill('SIGKILL'); } catch {}
-    try { ffmpeg.stdout.destroy(); } catch {}
-    try { ffmpeg.stderr.destroy(); } catch {}
+    if(cleaned)return;
+    cleaned=true;
+    try{output?.destroy();}catch{}
+    try{ffmpeg.stdout?.destroy();}catch{}
+    try{ffmpeg.stderr?.destroy();}catch{}
+    if(!ffmpeg.killed){
+      try{ffmpeg.kill('SIGKILL');}catch{}
+    }
   };
+
+  output.once('close', cleanup);
+  ffmpeg.once('error', error => {
+    if(output&&!output.destroyed)output.destroy(error instanceof Error?error:new Error(String(error)));
+  });
 
   return await new Promise((resolve, reject) => {
     let settled = false;
@@ -685,25 +703,24 @@ async function ffmpegUrlStream(url, startSeconds, headers = {}) {
     ffmpeg.once('error', fail);
     ffmpeg.once('close', code => {
       if (!settled && code !== 0) {
-        fail(new Error('FFmpeg exited with code ' + code + (ffmpegErrorText(stderr) ? ': ' + ffmpegErrorText(stderr) : '.')));
+        const signal = ffmpeg.signalCode ? ' (' + ffmpeg.signalCode + ')' : '';
+        fail(new Error('FFmpeg exited with code ' + code + signal + (ffmpegErrorText(stderr) ? ': ' + ffmpegErrorText(stderr) : '.')));
       } else if (!settled) {
         fail(new Error('FFmpeg produced no audio output.'));
       }
     });
 
+    ffmpeg.stdout.once('error', fail);
     ffmpeg.stdout.once('data', chunk => {
       if (settled) return;
       settled = true;
       clearTimeout(timeout);
 
-      // Put the first PCM chunk back so createAudioResource receives every
-      // byte. Waiting for actual data also prevents a false "started" state
-      // when FFmpeg exits without producing audio.
-      ffmpeg.stdout.pause();
-      ffmpeg.stdout.unshift(chunk);
+      output.write(chunk);
+      ffmpeg.stdout.pipe(output);
 
       resolve({
-        stream: ffmpeg.stdout,
+        stream: output,
         inputType: StreamType.Raw,
         cleanup
       });
@@ -1099,6 +1116,9 @@ async function cleanupActiveStream(s) {
   const cleanup = s.streamCleanup;
   s.streamCleanup = null;
   try { cleanup(); } catch {}
+  // Let the destroyed stream/child process settle before another FFmpeg
+  // instance is attached to the same audio player.
+  await new Promise(resolve => setImmediate(resolve));
 }
 
 async function playTrack(guildId, client, track, offsetMs) {
