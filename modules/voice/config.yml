@@ -96,7 +96,7 @@ temporaryVoice:
   defaultHidden: false
   syncPermissions: true
   maxBitrate: 384000
-  cleanupIntervalSeconds: 30
+  cleanupIntervalSeconds: 10
   emptyRoomGraceSeconds: 300
   recoveryGraceSeconds: 600
 
