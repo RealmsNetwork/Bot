@@ -213,7 +213,7 @@ const emptySince=new Map();
 async function leaveEmptyTtsRooms(client){
   const configured=Number(client.modules.get('voice')?.config?.music?.leaveDelaySeconds);
   const delay=Math.max(30,Number.isFinite(configured)&&configured>0?configured:180)*1000;
-  const rooms=[...(client.voiceTtsRooms?.values?.()||[]),...(client.voiceRooms?.values?.()||[])];
+  const rooms=[...(client.voiceTtsRooms?.values?.()||[]),...(client.voiceRooms?.values?.()||[])].filter((room,index,self)=>room&&self.findIndex(x=>x===room)===index);
   for(const room of rooms){
     const connection=room?.ttsConnection;
     if(!connection)continue;
