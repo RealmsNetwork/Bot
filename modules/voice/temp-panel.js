@@ -736,7 +736,6 @@ async function deleteRoom(client,rooms,room,guild,reason='Temporary voice room d
       try{session.player?.stop(true);}catch{}
       try{session.connection?.destroy?.();}catch{}
       session.connection=null;
-      if(rooms?.connection===session.connection)rooms.connection=null;
     }else{
       try{ttsConnection?.destroy?.();}catch{}
     }
