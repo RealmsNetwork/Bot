@@ -207,6 +207,7 @@ function getSession(guildId, client) {
     startedAt: 0,
     pausedAt: 0,
     transition: false,
+    streamCleanup: null,
     emptySince: 0,
     panel: {
       messageId: null,
@@ -466,54 +467,171 @@ async function ytdlpInfo(client, url) {
   return info || {};
 }
 
+function ffmpegBinary() {
+  try { return process.env.FFMPEG_PATH || require('ffmpeg-static'); } catch { return 'ffmpeg'; }
+}
+
+function ffmpegErrorText(stderr) {
+  return String(stderr || '').replace(/\x1b\[[0-9;]*m/g, '').trim().split('\n').filter(Boolean).slice(-4).join(' | ');
+}
+
 async function ytdlpStream(client, url, startSeconds) {
   const normalized = normalizeUrl(url);
   if (!normalized) throw new Error('The resolved playback URL is empty or invalid.');
+
   const wrapper = await ensureYtdlp(client);
   const args = [
     ...ytdlpCommonArgs(),
-    '-f', 'bestaudio[ext=webm][acodec=opus]/bestaudio[acodec=opus]/bestaudio/best',
+    '-f', 'bestaudio/best',
     '-o', '-'
   ];
+
   if (Number(startSeconds) > 0) {
     args.push('--download-sections', '*' + String(Number(startSeconds)), '--force-keyframes-at-cuts');
   }
+
   args.push(normalized);
 
   const source = wrapper.execStream(args);
+  const ffmpeg = spawn(ffmpegBinary(), [
+    '-hide_banner',
+    '-loglevel', 'error',
+    '-i', 'pipe:0',
+    '-vn',
+    '-ar', '48000',
+    '-ac', '2',
+    '-f', 's16le',
+    'pipe:1'
+  ], { stdio: ['pipe', 'pipe', 'pipe'] });
+
+  let stderr = '';
+  ffmpeg.stderr.on('data', chunk => {
+    stderr = (stderr + chunk.toString()).slice(-8192);
+  });
+
+  const cleanup = () => {
+    try { source.unpipe(ffmpeg.stdin); } catch {}
+    try { source.ytDlpProcess?.kill(); } catch {}
+    try { source.destroy(); } catch {}
+    try { ffmpeg.stdin.destroy(); } catch {}
+    try { ffmpeg.kill('SIGKILL'); } catch {}
+    try { ffmpeg.stdout.destroy(); } catch {}
+  };
+
+  source.once('error', () => {
+    try { ffmpeg.stdin.destroy(); } catch {}
+    if (ffmpeg.exitCode == null) {
+      try { ffmpeg.kill('SIGKILL'); } catch {}
+    }
+  });
+
+  source.pipe(ffmpeg.stdin);
+
   return await new Promise((resolve, reject) => {
     let settled = false;
-    const passthrough = new PassThrough();
     const timeout = setTimeout(() => {
       if (settled) return;
       settled = true;
-      try { source.ytDlpProcess?.kill(); } catch {}
-      reject(new Error('yt-dlp timeout: no audio data received within 20 seconds.'));
+      cleanup();
+      reject(new Error('yt-dlp/FFmpeg timeout: no playable audio data received within 20 seconds.'));
     }, 20000);
     timeout.unref?.();
 
-    source.once('data', firstChunk => {
+    const fail = error => {
       if (settled) return;
       settled = true;
       clearTimeout(timeout);
-      passthrough.write(firstChunk);
-      source.pipe(passthrough);
-      resolve(passthrough);
-    });
-    source.once('error', error => {
-      if (settled) {
-        passthrough.destroy(error instanceof Error ? error : new Error(String(error)));
-        return;
-      }
-      settled = true;
-      clearTimeout(timeout);
+      cleanup();
       reject(error instanceof Error ? error : new Error(String(error)));
+    };
+
+    ffmpeg.once('error', error => fail(error));
+    ffmpeg.once('close', code => {
+      if (!settled && code !== 0) {
+        fail(new Error('FFmpeg exited with code ' + code + (ffmpegErrorText(stderr) ? ': ' + ffmpegErrorText(stderr) : '.')));
+      } else if (!settled) {
+        fail(new Error('FFmpeg produced no audio output.'));
+      }
     });
-    source.once('end', () => {
+
+    ffmpeg.stdout.once('readable', () => {
       if (settled) return;
       settled = true;
       clearTimeout(timeout);
-      reject(new Error('yt-dlp produced no audio output.'));
+      resolve({
+        stream: ffmpeg.stdout,
+        inputType: StreamType.Raw,
+        cleanup
+      });
+    });
+  });
+}
+
+async function ffmpegDirectStream(url, startSeconds) {
+  const normalized = normalizeUrl(url);
+  if (!normalized) throw new Error('The direct playback URL is empty or invalid.');
+
+  const ffmpeg = spawn(ffmpegBinary(), [
+    '-hide_banner',
+    '-loglevel', 'error',
+    '-reconnect', '1',
+    '-reconnect_streamed', '1',
+    '-reconnect_delay_max', '5',
+    ...(Number(startSeconds) > 0 ? ['-ss', String(Number(startSeconds))] : []),
+    '-i', normalized,
+    '-vn',
+    '-ar', '48000',
+    '-ac', '2',
+    '-f', 's16le',
+    'pipe:1'
+  ], { stdio: ['ignore', 'pipe', 'pipe'] });
+
+  let stderr = '';
+  ffmpeg.stderr.on('data', chunk => {
+    stderr = (stderr + chunk.toString()).slice(-8192);
+  });
+
+  const cleanup = () => {
+    try { ffmpeg.kill('SIGKILL'); } catch {}
+    try { ffmpeg.stdout.destroy(); } catch {}
+  };
+
+  return await new Promise((resolve, reject) => {
+    let settled = false;
+    const timeout = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(new Error('FFmpeg timeout: no playable audio data received within 20 seconds.'));
+    }, 20000);
+    timeout.unref?.();
+
+    const fail = error => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      cleanup();
+      reject(error instanceof Error ? error : new Error(String(error)));
+    };
+
+    ffmpeg.once('error', error => fail(error));
+    ffmpeg.once('close', code => {
+      if (!settled && code !== 0) {
+        fail(new Error('FFmpeg exited with code ' + code + (ffmpegErrorText(stderr) ? ': ' + ffmpegErrorText(stderr) : '.')));
+      } else if (!settled) {
+        fail(new Error('FFmpeg produced no audio output.'));
+      }
+    });
+
+    ffmpeg.stdout.once('readable', () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      resolve({
+        stream: ffmpeg.stdout,
+        inputType: StreamType.Raw,
+        cleanup
+      });
     });
   });
 }
@@ -746,26 +864,49 @@ function tooLong(client, track) {
 
 function currentPosition(s) {
   if (!s?.current) return 0;
-  if (s.player.state.status === AudioPlayerStatus.Paused) return s.pausedAt || 0;
-  if (s.player.state.status === AudioPlayerStatus.Playing) return Math.max(0, Date.now() - (s.startedAt || Date.now()));
-  return Number(s.current.positionMs || 0);
+
+  const offset = Math.max(0, Number(s.current.positionMs || 0));
+  const state = s.player?.state;
+  const status = state?.status;
+
+  if (
+    status === AudioPlayerStatus.Playing ||
+    status === AudioPlayerStatus.Paused ||
+    status === AudioPlayerStatus.AutoPaused ||
+    status === AudioPlayerStatus.Buffering
+  ) {
+    const playback = Math.max(0, Number(state?.playbackDuration ?? s.resource?.playbackDuration ?? 0));
+    return Math.max(offset, offset + playback);
+  }
+
+  return offset;
 }
 
 function progressBar(pos, dur) {
-  if (!dur) return 'LIVE';
-  const p = clamp(pos / (dur * 1000), 0, 1);
-  const filled = Math.round(p * 20);
-  return '▰'.repeat(filled) + '▱'.repeat(20 - filled);
+  if (!dur) return 'LIVE  ━━━━━━━━━━━━━━━━━━━━━━━━';
+
+  const ratio = clamp(pos / Math.max(1, dur * 1000), 0, 1);
+  const size = 24;
+  const cursor = Math.min(size - 1, Math.floor(ratio * size));
+  return '━'.repeat(cursor) + '●' + '━'.repeat(Math.max(0, size - cursor - 1));
 }
 
 function currentSummary(s) {
   if (!s?.current) return 'Nothing is playing.';
+
   const pos = currentPosition(s);
+  const durationMs = Math.max(0, Number(s.current.duration || 0) * 1000);
+  const percent = durationMs ? Math.round(clamp(pos / durationMs, 0, 1) * 100) : null;
+  const status = s.player?.state?.status === AudioPlayerStatus.Paused ? 'Paused' :
+    s.player?.state?.status === AudioPlayerStatus.Playing ? 'Playing' :
+    s.player?.state?.status === AudioPlayerStatus.Buffering ? 'Buffering' : 'Ready';
+
   return '**' + clean(s.current.title, 180) + '**' +
     (s.current.artist ? '\n' + clean(s.current.artist, 120) : '') +
-    '\n' + progressBar(pos, s.current.duration) +
-    '\n' + fmtMs(pos) + ' / ' + (s.current.duration ? fmt(s.current.duration) : 'LIVE') +
-    '\n' + sourceLabel(s.current.sourceProvider);
+    '\n\n' + progressBar(pos, s.current.duration) +
+    '\n**' + fmtMs(pos) + '** / **' + (s.current.duration ? fmt(s.current.duration) : 'LIVE') + '**' +
+    (percent == null ? '' : ' · **' + percent + '%**') +
+    '\n' + status + ' · ' + sourceLabel(s.current.sourceProvider);
 }
 
 function queueText(s) {
@@ -874,47 +1015,66 @@ async function refreshPanel(guildId, client) {
   if (message) await message.edit(panelPayload(client, s)).catch(() => {});
 }
 
+async function cleanupActiveStream(s) {
+  if (!s?.streamCleanup) return;
+  const cleanup = s.streamCleanup;
+  s.streamCleanup = null;
+  try { cleanup(); } catch {}
+}
+
 async function playTrack(guildId, client, track, offsetMs) {
   const s = getSession(guildId, client);
   s.transition = true;
 
+  let streamCleanup = null;
+
   try {
+    await cleanupActiveStream(s);
     try { s.player.stop(true); } catch {}
     s.resource = null;
 
     const input = normalizeUrl(track.playbackUrl || track.url || track.sourceUrl);
     if (!input) throw new Error('This track has no valid playback URL.');
-    let stream;
-    let inputType = StreamType.Arbitrary;
 
-    if (String(track.playbackProvider).toLowerCase().includes('youtube') && !offsetMs) {
-      const r = await play.stream(input, { quality: 2, discordPlayerCompatibility: false });
-      stream = r.stream;
-      inputType = r.type;
-    } else if (String(track.playbackProvider).toLowerCase() === 'ffmpeg') {
-      let binary = 'ffmpeg';
-      try { binary = process.env.FFMPEG_PATH || require('ffmpeg-static') || binary; } catch {}
-      const args = ['-hide_banner', '-loglevel', 'error', '-reconnect', '1', '-reconnect_streamed', '1', '-reconnect_delay_max', '5'];
-      if (Number(offsetMs) > 0) args.push('-ss', String(Number(offsetMs) / 1000));
-      args.push('-i', input, '-vn', '-f', 'opus', '-ar', '48000', '-ac', '2', 'pipe:1');
-      const proc = spawn(binary, args, { stdio: ['ignore', 'pipe', 'pipe'] });
-      stream = proc.stdout;
+    let stream;
+    let inputType = StreamType.Raw;
+    const provider = String(track.playbackProvider || '').toLowerCase();
+
+    if (provider === 'ffmpeg') {
+      const result = await ffmpegDirectStream(input, Number(offsetMs || 0) / 1000);
+      stream = result.stream;
+      inputType = result.inputType;
+      streamCleanup = result.cleanup;
     } else {
-      stream = await ytdlpStream(client, input, Number(offsetMs || 0) / 1000);
+      const result = await ytdlpStream(client, input, Number(offsetMs || 0) / 1000);
+      stream = result.stream;
+      inputType = result.inputType;
+      streamCleanup = result.cleanup;
     }
 
+    s.streamCleanup = streamCleanup;
+    streamCleanup = null;
+
     s.current = { ...track, positionMs: Number(offsetMs || 0) };
-    s.startedAt = Date.now() - Number(offsetMs || 0);
-    s.pausedAt = Number(offsetMs || 0);
+    s.startedAt = Date.now();
+    s.pausedAt = 0;
+
     s.resource = createAudioResource(stream, {
       inputType,
       inlineVolume: true,
+      silencePaddingFrames: 5,
       metadata: { trackId: track.id || track.url }
     });
+
     s.resource.volume?.setVolume(clamp(s.volume / 100, 0, 1.5));
     s.connection?.subscribe(s.player);
     s.player.play(s.resource);
     s.skipVotes.clear();
+  } catch (error) {
+    if (streamCleanup) {
+      try { streamCleanup(); } catch {}
+    }
+    throw error;
   } finally {
     s.transition = false;
   }
