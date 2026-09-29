@@ -1015,6 +1015,30 @@ function activeTtsRoom(client, guildId, channelId) {
 async function addTrack(client, interaction, track) {
   const s = getSession(interaction.guildId, client);
   if (!interaction.member?.voice?.channelId) throw new Error('Join a voice channel first.');
+
+  // Search results from external providers can occasionally have metadata but no
+  // playable mirror URL. Recover it here instead of sending an empty URL to yt-dlp.
+  const playbackUrl = normalizeUrl(track?.playbackUrl || track?.url);
+  if (!playbackUrl) {
+    const fallbackQuery = clean((track?.artist ? track.artist + ' - ' : '') + (track?.title || ''), 240);
+    if (!fallbackQuery) throw new Error('That track has no playable URL.');
+    const fallback = (await youtubeSearch(fallbackQuery, 5))[0];
+    if (!fallback?.playbackUrl) throw new Error('Could not find a playable URL for that track.');
+    track = {
+      ...track,
+      ...fallback,
+      title: track.title || fallback.title,
+      artist: track.artist || fallback.artist,
+      duration: track.duration || fallback.duration,
+      thumbnail: track.thumbnail || fallback.thumbnail,
+      sourceProvider: track.sourceProvider || fallback.sourceProvider,
+      sourceUrl: track.sourceUrl || fallback.sourceUrl,
+      playbackProvider: 'YouTube mirror'
+    };
+  } else if (track.playbackUrl !== playbackUrl || track.url !== playbackUrl) {
+    track = { ...track, playbackUrl, url: playbackUrl };
+  }
+
   if (tooLong(client, track)) throw new Error('That track is over the configured maximum length.');
 
   const max = Math.max(1, Number(mc(client).maxQueueSize || 100));
