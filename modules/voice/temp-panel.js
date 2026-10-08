@@ -1432,7 +1432,7 @@ function initialize(client,rooms){
       const version=require('discord.js').version;
       major=Number(String(version||'14').split('.')[0])||14;
     }catch{}
-    client.once(major>=15?'clientReady':'ready',recoverOnce);
+    client.once(require('discord.js').Events.ClientReady||'ready',recoverOnce);
   }
 }
 
