@@ -57,7 +57,8 @@ async function start(){
     if(!Number.isInteger(total)||total<1){error(`[Sharding] Invalid shard count: ${total}`);process.exit(1);}
     console.log('[Shard Coordinator] Discovering Discord shard count...');
     console.log(`[Shard Coordinator] Discord recommended shards: ${total}`);
-    console.log(`[Shard Coordinator] Provider: ${providerName}`);\n    let coordinator;
+    console.log(`[Shard Coordinator] Provider: ${providerName}`);
+    let coordinator;
     try{coordinator=await createShardCoordinator(config,{instanceId:`${require('node:os').hostname()}-${process.pid}`});}catch(e){error(`[Sharding] Coordinator init failed: ${e.message}`);process.exit(1);}
     const active=await coordinator.getActiveShards();
     console.log(`[Shard Coordinator] Active shards: ${active.map((item)=>item.shardId).join(',') || 'none'}`);\n    const claimed=[];
