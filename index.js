@@ -41,7 +41,7 @@ function installMissing(entries) {
     let args;
     let shell = false;
 
-    if (npmExecPath && /\\.(?:c?js|mjs)$/i.test(npmExecPath)) {
+    if (npmExecPath && /\.(?:c?js|mjs)$/i.test(npmExecPath)) {
         command = process.execPath;
         args = [npmExecPath, ...npmArgs];
     } else {
