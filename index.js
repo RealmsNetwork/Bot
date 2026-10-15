@@ -15,7 +15,63 @@ function addPackage(spec,source='module'){if(!spec)return;const value=String(spe
 function addDependencies(value,source){if(Array.isArray(value))for(const spec of value)addPackage(spec,source);else if(value&&typeof value==='object')for(const[spec]of Object.entries(value))addPackage(spec,source);}
 addDependencies(packageJson.dependencies,'required');
 function resolveInstalled(name){try{require.resolve(name,{paths:[root]});return true;}catch{return false;}}
-function installMissing(entries){if(!entries.length)return true;rule();install(`Installing ${entries.length} missing package(s)...`);for(const entry of entries)info(`${entry.spec} [${entry.source}]`);const npm=process.env.npm_execpath||'npm';const result=spawnSync(npm,['install',...entries.map(e=>e.spec)],{stdio:'inherit',cwd:root,env:process.env});if(result.status!==0){error(`Dependency install failed with exit code ${result.status}`);return false;}return true;}
+function installMissing(entries) {
+    if (!entries.length) return true;
+
+    rule();
+    install(`Installing ${entries.length} missing package(s)...`);
+
+    for (const entry of entries) {
+        info(`${entry.spec} [${entry.source}]`);
+    }
+
+    const npmArgs = [
+        'install',
+        '--no-save',
+        '--package-lock=false',
+        '--no-audit',
+        '--no-fund',
+        ...entries.map(entry => entry.spec)
+    ];
+
+    // npm_execpath is often a JavaScript CLI path, not an executable.
+    // Invoke JS CLIs through the current Node executable.
+    const npmExecPath = process.env.npm_execpath;
+    let command;
+    let args;
+    let shell = false;
+
+    if (npmExecPath && /\\.(?:c?js|mjs)$/i.test(npmExecPath)) {
+        command = process.execPath;
+        args = [npmExecPath, ...npmArgs];
+    } else {
+        command = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+        args = npmArgs;
+        shell = process.platform === 'win32';
+    }
+
+    const result = spawnSync(command, args, {
+        stdio: 'inherit',
+        cwd: root,
+        env: process.env,
+        shell
+    });
+
+    if (result.error) {
+        error(`Dependency installation could not start: ${result.error.message}`);
+        return false;
+    }
+
+    if (result.status !== 0) {
+        error(
+            `Dependency install failed with exit code ${result.status ?? 'unknown'}` +
+            (result.signal ? ` (signal ${result.signal})` : '')
+        );
+        return false;
+    }
+
+    return true;
+}
 let requiredMissing=[];for(const[name,entry]of packages){if(resolveInstalled(name))ok(`${entry.spec} already installed`);else requiredMissing.push(entry);}if(!installMissing(requiredMissing))process.exit(1);
 require('dotenv').config({quiet:true});
 const {syncEnvSchema}=require('./lib/env-sync');
@@ -33,9 +89,34 @@ const shardSetting=config.sharding?.enabled===true?(config.sharding?.auto===true
 banner({version,node:process.version,platform:`${process.platform}/${process.arch}`,modules:`${enabledModules} enabled`,database:String(config.database?.enabled===true?config.database.primary||'none':'none'),sharding:shardSetting});
 boot(`Working directory: ${root}`);boot(`Process: ${process.pid} | ${process.execPath}`);rule();
 
-const missing=[];for(const[name,entry]of packages){if(!resolveInstalled(name)){missing.push(entry);}}
-if(missing.length){error(`Missing dependencies: ${missing.map(x=>x.spec).join(', ')}`);process.exit(1);}
-ok('Dependency bootstrap complete');rule();
+// Configuration-dependent packages (database drivers and dashboard tooling)
+ // are discovered after the first bootstrap pass. Install them here instead
+ // of merely reporting them as missing and crashing the bot.
+const missing = [];
+for (const [name, entry] of packages) {
+    if (!resolveInstalled(name)) missing.push(entry);
+}
+
+if (missing.length && !installMissing(missing)) {
+    error('Could not install all configuration-dependent packages.');
+    process.exit(1);
+}
+
+// Verify again after installation. Never continue with an incomplete runtime.
+const stillMissing = [];
+for (const [name, entry] of packages) {
+    if (!resolveInstalled(name)) stillMissing.push(entry);
+}
+
+if (stillMissing.length) {
+    error(
+        `Missing dependencies after installation: ${stillMissing.map(entry => entry.spec).join(', ')}`
+    );
+    process.exit(1);
+}
+
+ok('Dependency bootstrap complete');
+rule();
 
 const {ShardingManager}=require('discord.js');
 const {createShardCoordinator,discoverDiscordShards}=require('./lib/sharding');
